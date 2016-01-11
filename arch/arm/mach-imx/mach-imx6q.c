@@ -355,7 +355,7 @@ static void __init imx6q_opp_init(void)
 		goto put_node;
 	}
 
-	imx6q_opp_check_speed_grading(cpu_dev);
+	/* imx6q_opp_check_speed_grading(cpu_dev); */
 
 put_node:
 	of_node_put(np);
