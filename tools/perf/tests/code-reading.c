@@ -433,14 +433,13 @@ enum {
 
 static int do_test_code_reading(bool try_kcore)
 {
-	struct machines machines;
 	struct machine *machine;
 	struct thread *thread;
 	struct record_opts opts = {
 		.mmap_pages	     = UINT_MAX,
 		.user_freq	     = UINT_MAX,
 		.user_interval	     = ULLONG_MAX,
-		.freq		     = 4000,
+		.freq		     = 500,
 		.target		     = {
 			.uses_mmap   = true,
 		},
@@ -459,8 +458,7 @@ static int do_test_code_reading(bool try_kcore)
 
 	pid = getpid();
 
-	machines__init(&machines);
-	machine = &machines.host;
+	machine = machine__new_host();
 
 	ret = machine__create_kernel_maps(machine);
 	if (ret < 0) {
@@ -549,12 +547,25 @@ static int do_test_code_reading(bool try_kcore)
 		if (ret < 0) {
 			if (!excl_kernel) {
 				excl_kernel = true;
+				/*
+				 * Both cpus and threads are now owned by evlist
+				 * and will be freed by following perf_evlist__set_maps
+				 * call. Getting refference to keep them alive.
+				 */
+				cpu_map__get(cpus);
+				thread_map__get(threads);
 				perf_evlist__set_maps(evlist, NULL, NULL);
 				perf_evlist__delete(evlist);
 				evlist = NULL;
 				continue;
 			}
-			pr_debug("perf_evlist__open failed\n");
+
+			if (verbose) {
+				char errbuf[512];
+				perf_evlist__strerror_open(evlist, errno, errbuf, sizeof(errbuf));
+				pr_debug("perf_evlist__open() failed!\n%s\n", errbuf);
+			}
+
 			goto out_put;
 		}
 		break;
@@ -594,14 +605,13 @@ out_err:
 		cpu_map__put(cpus);
 		thread_map__put(threads);
 	}
-	machines__destroy_kernel_maps(&machines);
 	machine__delete_threads(machine);
-	machines__exit(&machines);
+	machine__delete(machine);
 
 	return err;
 }
 
-int test__code_reading(void)
+int test__code_reading(int subtest __maybe_unused)
 {
 	int ret;
 

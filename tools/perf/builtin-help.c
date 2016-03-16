@@ -6,11 +6,11 @@
 #include "perf.h"
 #include "util/cache.h"
 #include "builtin.h"
-#include "util/exec_cmd.h"
+#include <subcmd/exec-cmd.h>
 #include "common-cmds.h"
-#include "util/parse-options.h"
-#include "util/run-command.h"
-#include "util/help.h"
+#include <subcmd/parse-options.h>
+#include <subcmd/run-command.h>
+#include <subcmd/help.h>
 #include "util/debug.h"
 
 static struct man_viewer_list {
@@ -86,8 +86,7 @@ static int check_emacsclient_version(void)
 		return -1;
 	}
 
-	strbuf_remove(&buffer, 0, strlen("emacsclient"));
-	version = atoi(buffer.buf);
+	version = atoi(buffer.buf + strlen("emacsclient"));
 
 	if (version < 22) {
 		fprintf(stderr,
@@ -273,7 +272,7 @@ static int perf_help_config(const char *var, const char *value, void *cb)
 	if (!prefixcmp(var, "man."))
 		return add_man_viewer_info(var, value);
 
-	return perf_default_config(var, value, cb);
+	return 0;
 }
 
 static struct cmdnames main_cmds, other_cmds;
@@ -407,7 +406,7 @@ static int get_html_page_path(struct strbuf *page_path, const char *page)
 #ifndef open_html
 static void open_html(const char *path)
 {
-	execl_perf_cmd("web--browse", "-c", "help.browser", path, NULL);
+	execl_cmd("web--browse", "-c", "help.browser", path, NULL);
 }
 #endif
 

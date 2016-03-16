@@ -1,7 +1,12 @@
 #ifndef _ASM_X86_MSR_INDEX_H
 #define _ASM_X86_MSR_INDEX_H
 
-/* CPU model specific register (MSR) numbers */
+/*
+ * CPU model specific register (MSR) numbers.
+ *
+ * Do not add new entries to this file unless the definitions are shared
+ * between multiple compilation units.
+ */
 
 /* x86-64 specific MSRs */
 #define MSR_EFER		0xc0000080 /* extended feature register */
@@ -321,6 +326,7 @@
 #define MSR_F15H_PERF_CTR		0xc0010201
 #define MSR_F15H_NB_PERF_CTL		0xc0010240
 #define MSR_F15H_NB_PERF_CTR		0xc0010241
+#define MSR_F15H_IC_CFG			0xc0011021
 
 /* Fam 10h MSRs */
 #define MSR_FAM10H_MMIO_CONF_BASE	0xc0010058
