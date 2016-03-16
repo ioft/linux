@@ -377,7 +377,7 @@ int pstore_mkfile(enum pstore_type_id type, char *psname, u64 id, int count,
 		break;
 	}
 
-	inode_lock(d_inode(root));
+	mutex_lock(&d_inode(root)->i_mutex);
 
 	dentry = d_alloc_name(root, name);
 	if (!dentry)
@@ -397,12 +397,12 @@ int pstore_mkfile(enum pstore_type_id type, char *psname, u64 id, int count,
 	list_add(&private->list, &allpstore);
 	spin_unlock_irqrestore(&allpstore_lock, flags);
 
-	inode_unlock(d_inode(root));
+	mutex_unlock(&d_inode(root)->i_mutex);
 
 	return 0;
 
 fail_lockedalloc:
-	inode_unlock(d_inode(root));
+	mutex_unlock(&d_inode(root)->i_mutex);
 	kfree(private);
 fail_alloc:
 	iput(inode);

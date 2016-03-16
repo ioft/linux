@@ -8,7 +8,6 @@
 #include <linux/timer.h>
 #include <asm/pci-direct.h>
 #include <asm/tsc.h>
-#include <asm/cpufeature.h>
 
 #include "cpu.h"
 
@@ -104,7 +103,7 @@ static void check_cx686_slop(struct cpuinfo_x86 *c)
 		local_irq_restore(flags);
 
 		if (ccr5 & 2) { /* possible wrong calibration done */
-			pr_info("Recalibrating delay loop with SLOP bit reset\n");
+			printk(KERN_INFO "Recalibrating delay loop with SLOP bit reset\n");
 			calibrate_delay();
 			c->loops_per_jiffy = loops_per_jiffy;
 		}
@@ -116,7 +115,7 @@ static void set_cx86_reorder(void)
 {
 	u8 ccr3;
 
-	pr_info("Enable Memory access reorder on Cyrix/NSC processor.\n");
+	printk(KERN_INFO "Enable Memory access reorder on Cyrix/NSC processor.\n");
 	ccr3 = getCx86(CX86_CCR3);
 	setCx86(CX86_CCR3, (ccr3 & 0x0f) | 0x10); /* enable MAPEN */
 
@@ -129,7 +128,7 @@ static void set_cx86_reorder(void)
 
 static void set_cx86_memwb(void)
 {
-	pr_info("Enable Memory-Write-back mode on Cyrix/NSC processor.\n");
+	printk(KERN_INFO "Enable Memory-Write-back mode on Cyrix/NSC processor.\n");
 
 	/* CCR2 bit 2: unlock NW bit */
 	setCx86_old(CX86_CCR2, getCx86_old(CX86_CCR2) & ~0x04);
@@ -269,7 +268,7 @@ static void init_cyrix(struct cpuinfo_x86 *c)
 		 *  VSA1 we work around however.
 		 */
 
-		pr_info("Working around Cyrix MediaGX virtual DMA bugs.\n");
+		printk(KERN_INFO "Working around Cyrix MediaGX virtual DMA bugs.\n");
 		isa_dma_bridge_buggy = 2;
 
 		/* We do this before the PCI layer is running. However we
@@ -427,7 +426,7 @@ static void cyrix_identify(struct cpuinfo_x86 *c)
 		if (dir0 == 5 || dir0 == 3) {
 			unsigned char ccr3;
 			unsigned long flags;
-			pr_info("Enabling CPUID on Cyrix processor.\n");
+			printk(KERN_INFO "Enabling CPUID on Cyrix processor.\n");
 			local_irq_save(flags);
 			ccr3 = getCx86(CX86_CCR3);
 			/* enable MAPEN  */

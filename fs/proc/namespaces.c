@@ -30,23 +30,19 @@ static const struct proc_ns_operations *ns_entries[] = {
 	&mntns_operations,
 };
 
-static const char *proc_ns_get_link(struct dentry *dentry,
-				    struct inode *inode,
-				    struct delayed_call *done)
+static const char *proc_ns_follow_link(struct dentry *dentry, void **cookie)
 {
+	struct inode *inode = d_inode(dentry);
 	const struct proc_ns_operations *ns_ops = PROC_I(inode)->ns_ops;
 	struct task_struct *task;
 	struct path ns_path;
 	void *error = ERR_PTR(-EACCES);
 
-	if (!dentry)
-		return ERR_PTR(-ECHILD);
-
 	task = get_proc_task(inode);
 	if (!task)
 		return error;
 
-	if (ptrace_may_access(task, PTRACE_MODE_READ_FSCREDS)) {
+	if (ptrace_may_access(task, PTRACE_MODE_READ)) {
 		error = ns_get_path(&ns_path, task, ns_ops);
 		if (!error)
 			nd_jump_link(&ns_path);
@@ -67,7 +63,7 @@ static int proc_ns_readlink(struct dentry *dentry, char __user *buffer, int bufl
 	if (!task)
 		return res;
 
-	if (ptrace_may_access(task, PTRACE_MODE_READ_FSCREDS)) {
+	if (ptrace_may_access(task, PTRACE_MODE_READ)) {
 		res = ns_get_name(name, sizeof(name), task, ns_ops);
 		if (res >= 0)
 			res = readlink_copy(buffer, buflen, name);
@@ -78,7 +74,7 @@ static int proc_ns_readlink(struct dentry *dentry, char __user *buffer, int bufl
 
 static const struct inode_operations proc_ns_link_inode_operations = {
 	.readlink	= proc_ns_readlink,
-	.get_link	= proc_ns_get_link,
+	.follow_link	= proc_ns_follow_link,
 	.setattr	= proc_setattr,
 };
 

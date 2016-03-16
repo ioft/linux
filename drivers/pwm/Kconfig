@@ -148,7 +148,6 @@ config PWM_EP93XX
 
 config PWM_FSL_FTM
 	tristate "Freescale FlexTimer Module (FTM) PWM support"
-	depends on HAS_IOMEM
 	depends on OF
 	select REGMAP_MMIO
 	help
@@ -223,12 +222,18 @@ config PWM_LPC32XX
 	  will be called pwm-lpc32xx.
 
 config PWM_LPSS
-	tristate
+	tristate "Intel LPSS PWM support"
+	depends on X86
+	help
+	  Generic PWM framework driver for Intel Low Power Subsystem PWM
+	  controller.
+
+	  To compile this driver as a module, choose M here: the module
+	  will be called pwm-lpss.
 
 config PWM_LPSS_PCI
 	tristate "Intel LPSS PWM PCI driver"
-	depends on X86 && PCI
-	select PWM_LPSS
+	depends on PWM_LPSS && PCI
 	help
 	  The PCI driver for Intel Low Power Subsystem PWM controller.
 
@@ -237,8 +242,7 @@ config PWM_LPSS_PCI
 
 config PWM_LPSS_PLATFORM
 	tristate "Intel LPSS PWM platform driver"
-	depends on X86 && ACPI
-	select PWM_LPSS
+	depends on PWM_LPSS && ACPI
 	help
 	  The platform driver for Intel Low Power Subsystem PWM controller.
 
@@ -265,15 +269,6 @@ config PWM_MXS
 
 	  To compile this driver as a module, choose M here: the module
 	  will be called pwm-mxs.
-
-config PWM_OMAP_DMTIMER
-	tristate "OMAP Dual-Mode Timer PWM support"
-	depends on OF && ARCH_OMAP && OMAP_DM_TIMER
-	help
-	  Generic PWM framework driver for OMAP Dual-Mode Timer PWM output
-
-	  To compile this driver as a module, choose M here: the module
-	  will be called pwm-omap-dmtimer
 
 config PWM_PCA9685
 	tristate "NXP PCA9685 PWM driver"

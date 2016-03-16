@@ -5,7 +5,7 @@
  *****************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2016, Intel Corp.
+ * Copyright (C) 2000 - 2015, Intel Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -733,7 +733,6 @@ acpi_ps_get_next_arg(struct acpi_walk_state *walk_state,
 		if (!arg) {
 			return_ACPI_STATUS(AE_NO_MEMORY);
 		}
-
 		acpi_ps_get_next_simple_arg(parser_state, arg_type, arg);
 		break;
 
@@ -799,7 +798,6 @@ acpi_ps_get_next_arg(struct acpi_walk_state *walk_state,
 	case ARGP_TARGET:
 	case ARGP_SUPERNAME:
 	case ARGP_SIMPLENAME:
-	case ARGP_NAME_OR_REF:
 
 		subop = acpi_ps_peek_opcode(parser_state);
 		if (subop == 0 ||
@@ -822,11 +820,11 @@ acpi_ps_get_next_arg(struct acpi_walk_state *walk_state,
 				status =
 				    acpi_ps_get_next_namepath(walk_state,
 							      parser_state, arg,
-							      ACPI_POSSIBLE_METHOD_CALL);
+							      1);
 
 				/*
-				 * If the super_name argument is a method call, we have
-				 * already restored the AML pointer, just free this Arg
+				 * If the super_name arg of Unload is a method call,
+				 * we have restored the AML pointer, just free this Arg
 				 */
 				if (arg->common.aml_opcode ==
 				    AML_INT_METHODCALL_OP) {
@@ -837,7 +835,7 @@ acpi_ps_get_next_arg(struct acpi_walk_state *walk_state,
 				status =
 				    acpi_ps_get_next_namepath(walk_state,
 							      parser_state, arg,
-							      ACPI_NOT_METHOD_CALL);
+							      0);
 			}
 		} else {
 			/* Single complex argument, nothing returned */

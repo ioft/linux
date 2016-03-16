@@ -165,8 +165,7 @@ static inline __wsum remcsum_adjust(void *ptr, __wsum csum,
 	csum = csum_sub(csum, csum_partial(ptr, start, 0));
 
 	/* Set derived checksum in packet */
-	delta = csum_sub((__force __wsum)csum_fold(csum),
-			 (__force __wsum)*psum);
+	delta = csum_sub(csum_fold(csum), *psum);
 	*psum = csum_fold(csum);
 
 	return delta;

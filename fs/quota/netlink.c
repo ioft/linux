@@ -1,5 +1,7 @@
+
 #include <linux/cred.h>
 #include <linux/init.h>
+#include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/quotaops.h>
 #include <linux/sched.h>
@@ -103,4 +105,5 @@ static int __init quota_init(void)
 		       "VFS: Failed to create quota netlink interface.\n");
 	return 0;
 };
-fs_initcall(quota_init);
+
+module_init(quota_init);

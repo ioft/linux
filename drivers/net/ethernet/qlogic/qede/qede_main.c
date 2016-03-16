@@ -1502,11 +1502,8 @@ static int qede_set_num_queues(struct qede_dev *edev)
 	u16 rss_num;
 
 	/* Setup queues according to possible resources*/
-	if (edev->req_rss)
-		rss_num = edev->req_rss;
-	else
-		rss_num = netif_get_num_default_rss_queues() *
-			  edev->dev_info.common.num_hwfns;
+	rss_num = netif_get_num_default_rss_queues() *
+		  edev->dev_info.common.num_hwfns;
 
 	rss_num = min_t(u16, QEDE_MAX_RSS_CNT(edev), rss_num);
 

@@ -18,8 +18,6 @@
 #include <linux/of_address.h>
 #include <linux/slab.h>
 
-#include "clk-div6.h"
-
 #define CPG_DIV6_CKSTP		BIT(8)
 #define CPG_DIV6_DIV(d)		((d) & 0x3f)
 #define CPG_DIV6_DIV_MASK	0x3f
@@ -174,43 +172,66 @@ static const struct clk_ops cpg_div6_clock_ops = {
 	.set_rate = cpg_div6_clock_set_rate,
 };
 
-
-/**
- * cpg_div6_register - Register a DIV6 clock
- * @name: Name of the DIV6 clock
- * @num_parents: Number of parent clocks of the DIV6 clock (1, 4, or 8)
- * @parent_names: Array containing the names of the parent clocks
- * @reg: Mapped register used to control the DIV6 clock
- */
-struct clk * __init cpg_div6_register(const char *name,
-				      unsigned int num_parents,
-				      const char **parent_names,
-				      void __iomem *reg)
+static void __init cpg_div6_clock_init(struct device_node *np)
 {
-	unsigned int valid_parents;
+	unsigned int num_parents, valid_parents;
+	const char **parent_names;
 	struct clk_init_data init;
 	struct div6_clock *clock;
+	const char *name;
 	struct clk *clk;
 	unsigned int i;
+	int ret;
 
 	clock = kzalloc(sizeof(*clock), GFP_KERNEL);
 	if (!clock)
-		return ERR_PTR(-ENOMEM);
+		return;
 
-	clock->parents = kmalloc_array(num_parents, sizeof(*clock->parents),
-				       GFP_KERNEL);
-	if (!clock->parents) {
-		clk = ERR_PTR(-ENOMEM);
-		goto free_clock;
+	num_parents = of_clk_get_parent_count(np);
+	if (num_parents < 1) {
+		pr_err("%s: no parent found for %s DIV6 clock\n",
+		       __func__, np->name);
+		return;
 	}
 
-	clock->reg = reg;
+	clock->parents = kmalloc_array(num_parents, sizeof(*clock->parents),
+		GFP_KERNEL);
+	parent_names = kmalloc_array(num_parents, sizeof(*parent_names),
+				GFP_KERNEL);
+	if (!parent_names)
+		return;
 
-	/*
-	 * Read the divisor. Disabling the clock overwrites the divisor, so we
-	 * need to cache its value for the enable operation.
+	/* Remap the clock register and read the divisor. Disabling the
+	 * clock overwrites the divisor, so we need to cache its value for the
+	 * enable operation.
 	 */
+	clock->reg = of_iomap(np, 0);
+	if (clock->reg == NULL) {
+		pr_err("%s: failed to map %s DIV6 clock register\n",
+		       __func__, np->name);
+		goto error;
+	}
+
 	clock->div = (clk_readl(clock->reg) & CPG_DIV6_DIV_MASK) + 1;
+
+	/* Parse the DT properties. */
+	ret = of_property_read_string(np, "clock-output-names", &name);
+	if (ret < 0) {
+		pr_err("%s: failed to get %s DIV6 clock output name\n",
+		       __func__, np->name);
+		goto error;
+	}
+
+
+	for (i = 0, valid_parents = 0; i < num_parents; i++) {
+		const char *name = of_clk_get_parent_name(np, i);
+
+		if (name) {
+			parent_names[valid_parents] = name;
+			clock->parents[valid_parents] = i;
+			valid_parents++;
+		}
+	}
 
 	switch (num_parents) {
 	case 1:
@@ -229,18 +250,8 @@ struct clk * __init cpg_div6_register(const char *name,
 		break;
 	default:
 		pr_err("%s: invalid number of parents for DIV6 clock %s\n",
-		       __func__, name);
-		clk = ERR_PTR(-EINVAL);
-		goto free_parents;
-	}
-
-	/* Filter out invalid parents */
-	for (i = 0, valid_parents = 0; i < num_parents; i++) {
-		if (parent_names[i]) {
-			parent_names[valid_parents] = parent_names[i];
-			clock->parents[valid_parents] = i;
-			valid_parents++;
-		}
+		       __func__, np->name);
+		goto error;
 	}
 
 	/* Register the clock. */
@@ -253,53 +264,6 @@ struct clk * __init cpg_div6_register(const char *name,
 	clock->hw.init = &init;
 
 	clk = clk_register(NULL, &clock->hw);
-	if (IS_ERR(clk))
-		goto free_parents;
-
-	return clk;
-
-free_parents:
-	kfree(clock->parents);
-free_clock:
-	kfree(clock);
-	return clk;
-}
-
-static void __init cpg_div6_clock_init(struct device_node *np)
-{
-	unsigned int num_parents;
-	const char **parent_names;
-	const char *clk_name = np->name;
-	void __iomem *reg;
-	struct clk *clk;
-	unsigned int i;
-
-	num_parents = of_clk_get_parent_count(np);
-	if (num_parents < 1) {
-		pr_err("%s: no parent found for %s DIV6 clock\n",
-		       __func__, np->name);
-		return;
-	}
-
-	parent_names = kmalloc_array(num_parents, sizeof(*parent_names),
-				GFP_KERNEL);
-	if (!parent_names)
-		return;
-
-	reg = of_iomap(np, 0);
-	if (reg == NULL) {
-		pr_err("%s: failed to map %s DIV6 clock register\n",
-		       __func__, np->name);
-		goto error;
-	}
-
-	/* Parse the DT properties. */
-	of_property_read_string(np, "clock-output-names", &clk_name);
-
-	for (i = 0; i < num_parents; i++)
-		parent_names[i] = of_clk_get_parent_name(np, i);
-
-	clk = cpg_div6_register(clk_name, num_parents, parent_names, reg);
 	if (IS_ERR(clk)) {
 		pr_err("%s: failed to register %s DIV6 clock (%ld)\n",
 		       __func__, np->name, PTR_ERR(clk));
@@ -312,8 +276,9 @@ static void __init cpg_div6_clock_init(struct device_node *np)
 	return;
 
 error:
-	if (reg)
-		iounmap(reg);
+	if (clock->reg)
+		iounmap(clock->reg);
 	kfree(parent_names);
+	kfree(clock);
 }
 CLK_OF_DECLARE(cpg_div6_clk, "renesas,cpg-div6-clock", cpg_div6_clock_init);

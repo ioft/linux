@@ -822,22 +822,16 @@ static void edt_ft5x06_ts_get_defaults(struct device *dev,
 	int error;
 
 	error = device_property_read_u32(dev, "threshold", &val);
-	if (!error) {
-		edt_ft5x06_register_write(tsdata, reg_addr->reg_threshold, val);
-		tsdata->threshold = val;
-	}
+	if (!error)
+		reg_addr->reg_threshold = val;
 
 	error = device_property_read_u32(dev, "gain", &val);
-	if (!error) {
-		edt_ft5x06_register_write(tsdata, reg_addr->reg_gain, val);
-		tsdata->gain = val;
-	}
+	if (!error)
+		reg_addr->reg_gain = val;
 
 	error = device_property_read_u32(dev, "offset", &val);
-	if (!error) {
-		edt_ft5x06_register_write(tsdata, reg_addr->reg_offset, val);
-		tsdata->offset = val;
-	}
+	if (!error)
+		reg_addr->reg_offset = val;
 }
 
 static void

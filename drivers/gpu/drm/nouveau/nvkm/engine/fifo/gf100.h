@@ -5,7 +5,6 @@
 
 #include <subdev/mmu.h>
 
-struct gf100_fifo_chan;
 struct gf100_fifo {
 	struct nvkm_fifo base;
 
@@ -28,7 +27,5 @@ struct gf100_fifo {
 };
 
 void gf100_fifo_intr_engine(struct gf100_fifo *);
-void gf100_fifo_runlist_insert(struct gf100_fifo *, struct gf100_fifo_chan *);
-void gf100_fifo_runlist_remove(struct gf100_fifo *, struct gf100_fifo_chan *);
-void gf100_fifo_runlist_commit(struct gf100_fifo *);
+void gf100_fifo_runlist_update(struct gf100_fifo *);
 #endif

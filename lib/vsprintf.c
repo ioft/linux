@@ -31,9 +31,6 @@
 #include <linux/dcache.h>
 #include <linux/cred.h>
 #include <net/addrconf.h>
-#ifdef CONFIG_BLOCK
-#include <linux/blkdev.h>
-#endif
 
 #include <asm/page.h>		/* for PAGE_SIZE */
 #include <asm/sections.h>	/* for dereference_function_descriptor() */
@@ -383,14 +380,13 @@ enum format_type {
 };
 
 struct printf_spec {
-	unsigned int	type:8;		/* format_type enum */
-	signed int	field_width:24;	/* width of output field */
-	unsigned int	flags:8;	/* flags to number() */
-	unsigned int	base:8;		/* number base, 8, 10 or 16 only */
-	signed int	precision:16;	/* # of digits/chars */
-} __packed;
-#define FIELD_WIDTH_MAX ((1 << 23) - 1)
-#define PRECISION_MAX ((1 << 15) - 1)
+	u8	type;		/* format_type enum */
+	u8	flags;		/* flags to number() */
+	u8	base;		/* number base, 8, 10 or 16 only */
+	u8	qualifier;	/* number qualifier, one of 'hHlLtzZ' */
+	s16	field_width;	/* width of output field */
+	s16	precision;	/* # of digits/chars */
+};
 
 static noinline_for_stack
 char *number(char *buf, char *end, unsigned long long num,
@@ -403,10 +399,6 @@ char *number(char *buf, char *end, unsigned long long num,
 	int need_pfx = ((spec.flags & SPECIAL) && spec.base != 10);
 	int i;
 	bool is_zero = num == 0LL;
-	int field_width = spec.field_width;
-	int precision = spec.precision;
-
-	BUILD_BUG_ON(sizeof(struct printf_spec) != 8);
 
 	/* locase = 0 or 0x20. ORing digits or letters with 'locase'
 	 * produces same digits or (maybe lowercased) letters */
@@ -418,20 +410,20 @@ char *number(char *buf, char *end, unsigned long long num,
 		if ((signed long long)num < 0) {
 			sign = '-';
 			num = -(signed long long)num;
-			field_width--;
+			spec.field_width--;
 		} else if (spec.flags & PLUS) {
 			sign = '+';
-			field_width--;
+			spec.field_width--;
 		} else if (spec.flags & SPACE) {
 			sign = ' ';
-			field_width--;
+			spec.field_width--;
 		}
 	}
 	if (need_pfx) {
 		if (spec.base == 16)
-			field_width -= 2;
+			spec.field_width -= 2;
 		else if (!is_zero)
-			field_width--;
+			spec.field_width--;
 	}
 
 	/* generate full string in tmp[], in reverse order */
@@ -453,12 +445,12 @@ char *number(char *buf, char *end, unsigned long long num,
 	}
 
 	/* printing 100 using %2d gives "100", not "00" */
-	if (i > precision)
-		precision = i;
+	if (i > spec.precision)
+		spec.precision = i;
 	/* leading space padding */
-	field_width -= precision;
+	spec.field_width -= spec.precision;
 	if (!(spec.flags & (ZEROPAD | LEFT))) {
-		while (--field_width >= 0) {
+		while (--spec.field_width >= 0) {
 			if (buf < end)
 				*buf = ' ';
 			++buf;
@@ -487,14 +479,14 @@ char *number(char *buf, char *end, unsigned long long num,
 	if (!(spec.flags & LEFT)) {
 		char c = ' ' + (spec.flags & ZEROPAD);
 		BUILD_BUG_ON(' ' + ZEROPAD != '0');
-		while (--field_width >= 0) {
+		while (--spec.field_width >= 0) {
 			if (buf < end)
 				*buf = c;
 			++buf;
 		}
 	}
 	/* hmm even more zero padding? */
-	while (i <= --precision) {
+	while (i <= --spec.precision) {
 		if (buf < end)
 			*buf = '0';
 		++buf;
@@ -506,7 +498,7 @@ char *number(char *buf, char *end, unsigned long long num,
 		++buf;
 	}
 	/* trailing space padding */
-	while (--field_width >= 0) {
+	while (--spec.field_width >= 0) {
 		if (buf < end)
 			*buf = ' ';
 		++buf;
@@ -516,20 +508,37 @@ char *number(char *buf, char *end, unsigned long long num,
 }
 
 static noinline_for_stack
-char *special_hex_number(char *buf, char *end, unsigned long long num, int size)
+char *string(char *buf, char *end, const char *s, struct printf_spec spec)
 {
-	struct printf_spec spec;
+	int len, i;
 
-	spec.type = FORMAT_TYPE_PTR;
-	spec.field_width = 2 + 2 * size;	/* 0x + hex */
-	spec.flags = SPECIAL | SMALL | ZEROPAD;
-	spec.base = 16;
-	spec.precision = -1;
+	if ((unsigned long)s < PAGE_SIZE)
+		s = "(null)";
 
-	return number(buf, end, num, spec);
+	len = strnlen(s, spec.precision);
+
+	if (!(spec.flags & LEFT)) {
+		while (len < spec.field_width--) {
+			if (buf < end)
+				*buf = ' ';
+			++buf;
+		}
+	}
+	for (i = 0; i < len; ++i) {
+		if (buf < end)
+			*buf = *s;
+		++buf; ++s;
+	}
+	while (len < spec.field_width--) {
+		if (buf < end)
+			*buf = ' ';
+		++buf;
+	}
+
+	return buf;
 }
 
-static void move_right(char *buf, char *end, unsigned len, unsigned spaces)
+static void widen(char *buf, char *end, unsigned len, unsigned spaces)
 {
 	size_t size;
 	if (buf >= end)	/* nowhere to put anything */
@@ -545,56 +554,6 @@ static void move_right(char *buf, char *end, unsigned len, unsigned spaces)
 		memmove(buf + spaces, buf, len);
 	}
 	memset(buf, ' ', spaces);
-}
-
-/*
- * Handle field width padding for a string.
- * @buf: current buffer position
- * @n: length of string
- * @end: end of output buffer
- * @spec: for field width and flags
- * Returns: new buffer position after padding.
- */
-static noinline_for_stack
-char *widen_string(char *buf, int n, char *end, struct printf_spec spec)
-{
-	unsigned spaces;
-
-	if (likely(n >= spec.field_width))
-		return buf;
-	/* we want to pad the sucker */
-	spaces = spec.field_width - n;
-	if (!(spec.flags & LEFT)) {
-		move_right(buf - n, end, n, spaces);
-		return buf + spaces;
-	}
-	while (spaces--) {
-		if (buf < end)
-			*buf = ' ';
-		++buf;
-	}
-	return buf;
-}
-
-static noinline_for_stack
-char *string(char *buf, char *end, const char *s, struct printf_spec spec)
-{
-	int len = 0;
-	size_t lim = spec.precision;
-
-	if ((unsigned long)s < PAGE_SIZE)
-		s = "(null)";
-
-	while (lim--) {
-		char c = *s++;
-		if (!c)
-			break;
-		if (buf < end)
-			*buf = c;
-		++buf;
-		++len;
-	}
-	return widen_string(buf, len, end, spec);
 }
 
 static noinline_for_stack
@@ -638,28 +597,21 @@ char *dentry_name(char *buf, char *end, const struct dentry *d, struct printf_sp
 			*buf = c;
 	}
 	rcu_read_unlock();
-	return widen_string(buf, n, end, spec);
-}
-
-#ifdef CONFIG_BLOCK
-static noinline_for_stack
-char *bdev_name(char *buf, char *end, struct block_device *bdev,
-		struct printf_spec spec, const char *fmt)
-{
-	struct gendisk *hd = bdev->bd_disk;
-	
-	buf = string(buf, end, hd->disk_name, spec);
-	if (bdev->bd_part->partno) {
-		if (isdigit(hd->disk_name[strlen(hd->disk_name)-1])) {
-			if (buf < end)
-				*buf = 'p';
-			buf++;
+	if (n < spec.field_width) {
+		/* we want to pad the sucker */
+		unsigned spaces = spec.field_width - n;
+		if (!(spec.flags & LEFT)) {
+			widen(buf - n, end, n, spaces);
+			return buf + spaces;
 		}
-		buf = number(buf, end, bdev->bd_part->partno, spec);
+		while (spaces--) {
+			if (buf < end)
+				*buf = ' ';
+			++buf;
+		}
 	}
 	return buf;
 }
-#endif
 
 static noinline_for_stack
 char *symbol_string(char *buf, char *end, void *ptr,
@@ -684,7 +636,11 @@ char *symbol_string(char *buf, char *end, void *ptr,
 
 	return string(buf, end, sym, spec);
 #else
-	return special_hex_number(buf, end, value, sizeof(void *));
+	spec.field_width = 2 * sizeof(void *);
+	spec.flags |= SPECIAL | SMALL | ZEROPAD;
+	spec.base = 16;
+
+	return number(buf, end, value, spec);
 #endif
 }
 
@@ -1345,45 +1301,40 @@ char *uuid_string(char *buf, char *end, const u8 *addr,
 	return string(buf, end, uuid, spec);
 }
 
-static noinline_for_stack
-char *netdev_bits(char *buf, char *end, const void *addr, const char *fmt)
+static
+char *netdev_feature_string(char *buf, char *end, const u8 *addr,
+		      struct printf_spec spec)
 {
-	unsigned long long num;
-	int size;
+	spec.flags |= SPECIAL | SMALL | ZEROPAD;
+	if (spec.field_width == -1)
+		spec.field_width = 2 + 2 * sizeof(netdev_features_t);
+	spec.base = 16;
 
-	switch (fmt[1]) {
-	case 'F':
-		num = *(const netdev_features_t *)addr;
-		size = sizeof(netdev_features_t);
-		break;
-	default:
-		num = (unsigned long)addr;
-		size = sizeof(unsigned long);
-		break;
-	}
-
-	return special_hex_number(buf, end, num, size);
+	return number(buf, end, *(const netdev_features_t *)addr, spec);
 }
 
 static noinline_for_stack
-char *address_val(char *buf, char *end, const void *addr, const char *fmt)
+char *address_val(char *buf, char *end, const void *addr,
+		  struct printf_spec spec, const char *fmt)
 {
 	unsigned long long num;
-	int size;
+
+	spec.flags |= SPECIAL | SMALL | ZEROPAD;
+	spec.base = 16;
 
 	switch (fmt[1]) {
 	case 'd':
 		num = *(const dma_addr_t *)addr;
-		size = sizeof(dma_addr_t);
+		spec.field_width = sizeof(dma_addr_t) * 2 + 2;
 		break;
 	case 'p':
 	default:
 		num = *(const phys_addr_t *)addr;
-		size = sizeof(phys_addr_t);
+		spec.field_width = sizeof(phys_addr_t) * 2 + 2;
 		break;
 	}
 
-	return special_hex_number(buf, end, num, size);
+	return number(buf, end, num, spec);
 }
 
 static noinline_for_stack
@@ -1402,7 +1353,10 @@ char *clock(char *buf, char *end, struct clk *clk, struct printf_spec spec,
 #ifdef CONFIG_COMMON_CLK
 		return string(buf, end, __clk_get_name(clk), spec);
 #else
-		return special_hex_number(buf, end, (unsigned long)clk, sizeof(unsigned long));
+		spec.base = 16;
+		spec.field_width = sizeof(unsigned long) * 2 + 2;
+		spec.flags |= SPECIAL | SMALL | ZEROPAD;
+		return number(buf, end, (unsigned long)clk, spec);
 #endif
 	}
 }
@@ -1489,7 +1443,6 @@ int kptr_restrict __read_mostly;
  *           (default assumed to be phys_addr_t, passed by reference)
  * - 'd[234]' For a dentry name (optionally 2-4 last components)
  * - 'D[234]' Same as 'd' but for a struct file
- * - 'g' For block_device name (gendisk + partition number)
  * - 'C' For a clock, it prints the name (Common Clock Framework) or address
  *       (legacy clock framework) of the clock
  * - 'Cn' For a clock, it prints the name (Common Clock Framework) or address
@@ -1590,23 +1543,22 @@ char *pointer(const char *fmt, char *buf, char *end, void *ptr,
 			return buf;
 		}
 	case 'K':
+		/*
+		 * %pK cannot be used in IRQ context because its test
+		 * for CAP_SYSLOG would be meaningless.
+		 */
+		if (kptr_restrict && (in_irq() || in_serving_softirq() ||
+				      in_nmi())) {
+			if (spec.field_width == -1)
+				spec.field_width = default_width;
+			return string(buf, end, "pK-error", spec);
+		}
+
 		switch (kptr_restrict) {
 		case 0:
 			/* Always print %pK values */
 			break;
 		case 1: {
-			const struct cred *cred;
-
-			/*
-			 * kptr_restrict==1 cannot be used in IRQ context
-			 * because its test for CAP_SYSLOG would be meaningless.
-			 */
-			if (in_irq() || in_serving_softirq() || in_nmi()) {
-				if (spec.field_width == -1)
-					spec.field_width = default_width;
-				return string(buf, end, "pK-error", spec);
-			}
-
 			/*
 			 * Only print the real pointer value if the current
 			 * process has CAP_SYSLOG and is running with the
@@ -1616,7 +1568,8 @@ char *pointer(const char *fmt, char *buf, char *end, void *ptr,
 			 * leak pointer values if a binary opens a file using
 			 * %pK and then elevates privileges before reading it.
 			 */
-			cred = current_cred();
+			const struct cred *cred = current_cred();
+
 			if (!has_capability_noaudit(current, CAP_SYSLOG) ||
 			    !uid_eq(cred->euid, cred->uid) ||
 			    !gid_eq(cred->egid, cred->gid))
@@ -1632,9 +1585,13 @@ char *pointer(const char *fmt, char *buf, char *end, void *ptr,
 		break;
 
 	case 'N':
-		return netdev_bits(buf, end, ptr, fmt);
+		switch (fmt[1]) {
+		case 'F':
+			return netdev_feature_string(buf, end, ptr, spec);
+		}
+		break;
 	case 'a':
-		return address_val(buf, end, ptr, fmt);
+		return address_val(buf, end, ptr, spec, fmt);
 	case 'd':
 		return dentry_name(buf, end, ptr, spec, fmt);
 	case 'C':
@@ -1643,11 +1600,6 @@ char *pointer(const char *fmt, char *buf, char *end, void *ptr,
 		return dentry_name(buf, end,
 				   ((const struct file *)ptr)->f_path.dentry,
 				   spec, fmt);
-#ifdef CONFIG_BLOCK
-	case 'g':
-		return bdev_name(buf, end, ptr, spec, fmt);
-#endif
-
 	}
 	spec.flags |= SMALL;
 	if (spec.field_width == -1) {
@@ -1683,7 +1635,6 @@ static noinline_for_stack
 int format_decode(const char *fmt, struct printf_spec *spec)
 {
 	const char *start = fmt;
-	char qualifier;
 
 	/* we finished early by reading the field width */
 	if (spec->type == FORMAT_TYPE_WIDTH) {
@@ -1766,16 +1717,16 @@ precision:
 
 qualifier:
 	/* get the conversion qualifier */
-	qualifier = 0;
+	spec->qualifier = -1;
 	if (*fmt == 'h' || _tolower(*fmt) == 'l' ||
 	    _tolower(*fmt) == 'z' || *fmt == 't') {
-		qualifier = *fmt++;
-		if (unlikely(qualifier == *fmt)) {
-			if (qualifier == 'l') {
-				qualifier = 'L';
+		spec->qualifier = *fmt++;
+		if (unlikely(spec->qualifier == *fmt)) {
+			if (spec->qualifier == 'l') {
+				spec->qualifier = 'L';
 				++fmt;
-			} else if (qualifier == 'h') {
-				qualifier = 'H';
+			} else if (spec->qualifier == 'h') {
+				spec->qualifier = 'H';
 				++fmt;
 			}
 		}
@@ -1832,19 +1783,19 @@ qualifier:
 		return fmt - start;
 	}
 
-	if (qualifier == 'L')
+	if (spec->qualifier == 'L')
 		spec->type = FORMAT_TYPE_LONG_LONG;
-	else if (qualifier == 'l') {
+	else if (spec->qualifier == 'l') {
 		BUILD_BUG_ON(FORMAT_TYPE_ULONG + SIGN != FORMAT_TYPE_LONG);
 		spec->type = FORMAT_TYPE_ULONG + (spec->flags & SIGN);
-	} else if (_tolower(qualifier) == 'z') {
+	} else if (_tolower(spec->qualifier) == 'z') {
 		spec->type = FORMAT_TYPE_SIZE_T;
-	} else if (qualifier == 't') {
+	} else if (spec->qualifier == 't') {
 		spec->type = FORMAT_TYPE_PTRDIFF;
-	} else if (qualifier == 'H') {
+	} else if (spec->qualifier == 'H') {
 		BUILD_BUG_ON(FORMAT_TYPE_UBYTE + SIGN != FORMAT_TYPE_BYTE);
 		spec->type = FORMAT_TYPE_UBYTE + (spec->flags & SIGN);
-	} else if (qualifier == 'h') {
+	} else if (spec->qualifier == 'h') {
 		BUILD_BUG_ON(FORMAT_TYPE_USHORT + SIGN != FORMAT_TYPE_SHORT);
 		spec->type = FORMAT_TYPE_USHORT + (spec->flags & SIGN);
 	} else {
@@ -1853,24 +1804,6 @@ qualifier:
 	}
 
 	return ++fmt - start;
-}
-
-static void
-set_field_width(struct printf_spec *spec, int width)
-{
-	spec->field_width = width;
-	if (WARN_ONCE(spec->field_width != width, "field width %d too large", width)) {
-		spec->field_width = clamp(width, -FIELD_WIDTH_MAX, FIELD_WIDTH_MAX);
-	}
-}
-
-static void
-set_precision(struct printf_spec *spec, int prec)
-{
-	spec->precision = prec;
-	if (WARN_ONCE(spec->precision != prec, "precision %d too large", prec)) {
-		spec->precision = clamp(prec, 0, PRECISION_MAX);
-	}
 }
 
 /**
@@ -1940,11 +1873,11 @@ int vsnprintf(char *buf, size_t size, const char *fmt, va_list args)
 		}
 
 		case FORMAT_TYPE_WIDTH:
-			set_field_width(&spec, va_arg(args, int));
+			spec.field_width = va_arg(args, int);
 			break;
 
 		case FORMAT_TYPE_PRECISION:
-			set_precision(&spec, va_arg(args, int));
+			spec.precision = va_arg(args, int);
 			break;
 
 		case FORMAT_TYPE_CHAR: {
@@ -2384,11 +2317,11 @@ int bstr_printf(char *buf, size_t size, const char *fmt, const u32 *bin_buf)
 		}
 
 		case FORMAT_TYPE_WIDTH:
-			set_field_width(&spec, get_arg(int));
+			spec.field_width = get_arg(int);
 			break;
 
 		case FORMAT_TYPE_PRECISION:
-			set_precision(&spec, get_arg(int));
+			spec.precision = get_arg(int);
 			break;
 
 		case FORMAT_TYPE_CHAR: {

@@ -129,9 +129,9 @@ nvkm_fifo_uevent_ctor(struct nvkm_object *object, void *data, u32 size,
 	union {
 		struct nvif_notify_uevent_req none;
 	} *req = data;
-	int ret = -ENOSYS;
+	int ret;
 
-	if (!(ret = nvif_unvers(ret, &data, &size, req->none))) {
+	if (nvif_unvers(req->none)) {
 		notify->size  = sizeof(struct nvif_notify_uevent_rep);
 		notify->types = 1;
 		notify->index = 0;

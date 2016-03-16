@@ -417,8 +417,7 @@ __print_symbolic(opcode,                                   \
 	ib_opcode_name(UC_RDMA_WRITE_ONLY),                \
 	ib_opcode_name(UC_RDMA_WRITE_ONLY_WITH_IMMEDIATE), \
 	ib_opcode_name(UD_SEND_ONLY),                      \
-	ib_opcode_name(UD_SEND_ONLY_WITH_IMMEDIATE),       \
-	ib_opcode_name(CNP))
+	ib_opcode_name(UD_SEND_ONLY_WITH_IMMEDIATE))
 
 
 #define LRH_PRN "vl %d lver %d sl %d lnh %d,%s dlid %.4x len %d slid %.4x"

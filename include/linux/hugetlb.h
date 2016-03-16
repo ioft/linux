@@ -8,7 +8,6 @@
 #include <linux/cgroup.h>
 #include <linux/list.h>
 #include <linux/kref.h>
-#include <asm/pgtable.h>
 
 struct ctl_table;
 struct user_struct;
@@ -97,7 +96,9 @@ u32 hugetlb_fault_mutex_hash(struct hstate *h, struct mm_struct *mm,
 				struct address_space *mapping,
 				pgoff_t idx, unsigned long address);
 
+#ifdef CONFIG_ARCH_WANT_HUGE_PMD_SHARE
 pte_t *huge_pmd_share(struct mm_struct *mm, unsigned long addr, pud_t *pud);
+#endif
 
 extern int hugepages_treat_as_movable;
 extern int sysctl_hugetlb_shm_group;
@@ -264,18 +265,20 @@ struct file *hugetlb_file_setup(const char *name, size_t size, vm_flags_t acct,
 				struct user_struct **user, int creat_flags,
 				int page_size_log);
 
-static inline bool is_file_hugepages(struct file *file)
+static inline int is_file_hugepages(struct file *file)
 {
 	if (file->f_op == &hugetlbfs_file_operations)
-		return true;
+		return 1;
+	if (is_file_shm_hugepages(file))
+		return 1;
 
-	return is_file_shm_hugepages(file);
+	return 0;
 }
 
 
 #else /* !CONFIG_HUGETLBFS */
 
-#define is_file_hugepages(file)			false
+#define is_file_hugepages(file)			0
 static inline struct file *
 hugetlb_file_setup(const char *name, size_t size, vm_flags_t acctflag,
 		struct user_struct **user, int creat_flags,

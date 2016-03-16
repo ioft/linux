@@ -462,7 +462,7 @@ void fixup_irqs(void)
 		 * non intr-remapping case, we can't wait till this interrupt
 		 * arrives at this cpu before completing the irq move.
 		 */
-		irq_force_complete_move(desc);
+		irq_force_complete_move(irq);
 
 		if (cpumask_any_and(affinity, cpu_online_mask) >= nr_cpu_ids) {
 			break_affinity = 1;
@@ -470,15 +470,6 @@ void fixup_irqs(void)
 		}
 
 		chip = irq_data_get_irq_chip(data);
-		/*
-		 * The interrupt descriptor might have been cleaned up
-		 * already, but it is not yet removed from the radix tree
-		 */
-		if (!chip) {
-			raw_spin_unlock(&desc->lock);
-			continue;
-		}
-
 		if (!irqd_can_move_in_process_context(data) && chip->irq_mask)
 			chip->irq_mask(data);
 

@@ -10,7 +10,6 @@
 
 extern char *strndup_user(const char __user *, long);
 extern void *memdup_user(const void __user *, size_t);
-extern void *memdup_user_nul(const void __user *, size_t);
 
 /*
  * Include machine specific inline routines

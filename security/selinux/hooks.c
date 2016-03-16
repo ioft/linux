@@ -242,72 +242,6 @@ static int inode_alloc_security(struct inode *inode)
 	return 0;
 }
 
-static int inode_doinit_with_dentry(struct inode *inode, struct dentry *opt_dentry);
-
-/*
- * Try reloading inode security labels that have been marked as invalid.  The
- * @may_sleep parameter indicates when sleeping and thus reloading labels is
- * allowed; when set to false, returns ERR_PTR(-ECHILD) when the label is
- * invalid.  The @opt_dentry parameter should be set to a dentry of the inode;
- * when no dentry is available, set it to NULL instead.
- */
-static int __inode_security_revalidate(struct inode *inode,
-				       struct dentry *opt_dentry,
-				       bool may_sleep)
-{
-	struct inode_security_struct *isec = inode->i_security;
-
-	might_sleep_if(may_sleep);
-
-	if (isec->initialized == LABEL_INVALID) {
-		if (!may_sleep)
-			return -ECHILD;
-
-		/*
-		 * Try reloading the inode security label.  This will fail if
-		 * @opt_dentry is NULL and no dentry for this inode can be
-		 * found; in that case, continue using the old label.
-		 */
-		inode_doinit_with_dentry(inode, opt_dentry);
-	}
-	return 0;
-}
-
-static struct inode_security_struct *inode_security_novalidate(struct inode *inode)
-{
-	return inode->i_security;
-}
-
-static struct inode_security_struct *inode_security_rcu(struct inode *inode, bool rcu)
-{
-	int error;
-
-	error = __inode_security_revalidate(inode, NULL, !rcu);
-	if (error)
-		return ERR_PTR(error);
-	return inode->i_security;
-}
-
-/*
- * Get the security label of an inode.
- */
-static struct inode_security_struct *inode_security(struct inode *inode)
-{
-	__inode_security_revalidate(inode, NULL, true);
-	return inode->i_security;
-}
-
-/*
- * Get the security label of a dentry's backing inode.
- */
-static struct inode_security_struct *backing_inode_security(struct dentry *dentry)
-{
-	struct inode *inode = d_backing_inode(dentry);
-
-	__inode_security_revalidate(inode, dentry, true);
-	return inode->i_security;
-}
-
 static void inode_free_rcu(struct rcu_head *head)
 {
 	struct inode_security_struct *isec;
@@ -410,6 +344,8 @@ static const char *labeling_behaviors[7] = {
 	"uses mountpoint labeling",
 	"uses native labeling",
 };
+
+static int inode_doinit_with_dentry(struct inode *inode, struct dentry *opt_dentry);
 
 static inline int inode_doinit(struct inode *inode)
 {
@@ -629,8 +565,8 @@ static int selinux_get_mnt_opts(const struct super_block *sb,
 		opts->mnt_opts_flags[i++] = DEFCONTEXT_MNT;
 	}
 	if (sbsec->flags & ROOTCONTEXT_MNT) {
-		struct dentry *root = sbsec->sb->s_root;
-		struct inode_security_struct *isec = backing_inode_security(root);
+		struct inode *root = d_backing_inode(sbsec->sb->s_root);
+		struct inode_security_struct *isec = root->i_security;
 
 		rc = security_sid_to_context(isec->sid, &context, &len);
 		if (rc)
@@ -685,8 +621,8 @@ static int selinux_set_mnt_opts(struct super_block *sb,
 	int rc = 0, i;
 	struct superblock_security_struct *sbsec = sb->s_security;
 	const char *name = sb->s_type->name;
-	struct dentry *root = sbsec->sb->s_root;
-	struct inode_security_struct *root_isec = backing_inode_security(root);
+	struct inode *inode = d_backing_inode(sbsec->sb->s_root);
+	struct inode_security_struct *root_isec = inode->i_security;
 	u32 fscontext_sid = 0, context_sid = 0, rootcontext_sid = 0;
 	u32 defcontext_sid = 0;
 	char **mount_options = opts->mnt_opts;
@@ -866,7 +802,7 @@ static int selinux_set_mnt_opts(struct super_block *sb,
 			goto out;
 
 		root_isec->sid = rootcontext_sid;
-		root_isec->initialized = LABEL_INITIALIZED;
+		root_isec->initialized = 1;
 	}
 
 	if (defcontext_sid) {
@@ -916,8 +852,8 @@ static int selinux_cmp_sb_context(const struct super_block *oldsb,
 	if ((oldflags & DEFCONTEXT_MNT) && old->def_sid != new->def_sid)
 		goto mismatch;
 	if (oldflags & ROOTCONTEXT_MNT) {
-		struct inode_security_struct *oldroot = backing_inode_security(oldsb->s_root);
-		struct inode_security_struct *newroot = backing_inode_security(newsb->s_root);
+		struct inode_security_struct *oldroot = d_backing_inode(oldsb->s_root)->i_security;
+		struct inode_security_struct *newroot = d_backing_inode(newsb->s_root)->i_security;
 		if (oldroot->sid != newroot->sid)
 			goto mismatch;
 	}
@@ -967,14 +903,17 @@ static int selinux_sb_clone_mnt_opts(const struct super_block *oldsb,
 		if (!set_fscontext)
 			newsbsec->sid = sid;
 		if (!set_rootcontext) {
-			struct inode_security_struct *newisec = backing_inode_security(newsb->s_root);
+			struct inode *newinode = d_backing_inode(newsb->s_root);
+			struct inode_security_struct *newisec = newinode->i_security;
 			newisec->sid = sid;
 		}
 		newsbsec->mntpoint_sid = sid;
 	}
 	if (set_rootcontext) {
-		const struct inode_security_struct *oldisec = backing_inode_security(oldsb->s_root);
-		struct inode_security_struct *newisec = backing_inode_security(newsb->s_root);
+		const struct inode *oldinode = d_backing_inode(oldsb->s_root);
+		const struct inode_security_struct *oldisec = oldinode->i_security;
+		struct inode *newinode = d_backing_inode(newsb->s_root);
+		struct inode_security_struct *newisec = newinode->i_security;
 
 		newisec->sid = oldisec->sid;
 	}
@@ -1354,11 +1293,11 @@ static int inode_doinit_with_dentry(struct inode *inode, struct dentry *opt_dent
 	unsigned len = 0;
 	int rc = 0;
 
-	if (isec->initialized == LABEL_INITIALIZED)
+	if (isec->initialized)
 		goto out;
 
 	mutex_lock(&isec->lock);
-	if (isec->initialized == LABEL_INITIALIZED)
+	if (isec->initialized)
 		goto out_unlock;
 
 	sbsec = inode->i_sb->s_security;
@@ -1530,7 +1469,7 @@ static int inode_doinit_with_dentry(struct inode *inode, struct dentry *opt_dent
 		break;
 	}
 
-	isec->initialized = LABEL_INITIALIZED;
+	isec->initialized = 1;
 
 out_unlock:
 	mutex_unlock(&isec->lock);
@@ -1701,7 +1640,6 @@ static inline int dentry_has_perm(const struct cred *cred,
 
 	ad.type = LSM_AUDIT_DATA_DENTRY;
 	ad.u.dentry = dentry;
-	__inode_security_revalidate(inode, dentry, true);
 	return inode_has_perm(cred, inode, av, &ad);
 }
 
@@ -1717,7 +1655,6 @@ static inline int path_has_perm(const struct cred *cred,
 
 	ad.type = LSM_AUDIT_DATA_PATH;
 	ad.u.path = *path;
-	__inode_security_revalidate(inode, path->dentry, true);
 	return inode_has_perm(cred, inode, av, &ad);
 }
 
@@ -1775,13 +1712,13 @@ out:
 /*
  * Determine the label for an inode that might be unioned.
  */
-static int selinux_determine_inode_label(struct inode *dir,
+static int selinux_determine_inode_label(const struct inode *dir,
 					 const struct qstr *name,
 					 u16 tclass,
 					 u32 *_new_isid)
 {
 	const struct superblock_security_struct *sbsec = dir->i_sb->s_security;
-	const struct inode_security_struct *dsec = inode_security(dir);
+	const struct inode_security_struct *dsec = dir->i_security;
 	const struct task_security_struct *tsec = current_security();
 
 	if ((sbsec->flags & SE_SBINITIALIZED) &&
@@ -1810,7 +1747,7 @@ static int may_create(struct inode *dir,
 	struct common_audit_data ad;
 	int rc;
 
-	dsec = inode_security(dir);
+	dsec = dir->i_security;
 	sbsec = dir->i_sb->s_security;
 
 	sid = tsec->sid;
@@ -1863,8 +1800,8 @@ static int may_link(struct inode *dir,
 	u32 av;
 	int rc;
 
-	dsec = inode_security(dir);
-	isec = backing_inode_security(dentry);
+	dsec = dir->i_security;
+	isec = d_backing_inode(dentry)->i_security;
 
 	ad.type = LSM_AUDIT_DATA_DENTRY;
 	ad.u.dentry = dentry;
@@ -1907,10 +1844,10 @@ static inline int may_rename(struct inode *old_dir,
 	int old_is_dir, new_is_dir;
 	int rc;
 
-	old_dsec = inode_security(old_dir);
-	old_isec = backing_inode_security(old_dentry);
+	old_dsec = old_dir->i_security;
+	old_isec = d_backing_inode(old_dentry)->i_security;
 	old_is_dir = d_is_dir(old_dentry);
-	new_dsec = inode_security(new_dir);
+	new_dsec = new_dir->i_security;
 
 	ad.type = LSM_AUDIT_DATA_DENTRY;
 
@@ -1938,7 +1875,7 @@ static inline int may_rename(struct inode *old_dir,
 	if (rc)
 		return rc;
 	if (d_is_positive(new_dentry)) {
-		new_isec = backing_inode_security(new_dentry);
+		new_isec = d_backing_inode(new_dentry)->i_security;
 		new_is_dir = d_is_dir(new_dentry);
 		rc = avc_has_perm(sid, new_isec->sid,
 				  new_isec->sclass,
@@ -2074,8 +2011,8 @@ static int selinux_binder_transfer_file(struct task_struct *from,
 {
 	u32 sid = task_sid(to);
 	struct file_security_struct *fsec = file->f_security;
-	struct dentry *dentry = file->f_path.dentry;
-	struct inode_security_struct *isec = backing_inode_security(dentry);
+	struct inode *inode = d_backing_inode(file->f_path.dentry);
+	struct inode_security_struct *isec = inode->i_security;
 	struct common_audit_data ad;
 	int rc;
 
@@ -2091,7 +2028,7 @@ static int selinux_binder_transfer_file(struct task_struct *from,
 			return rc;
 	}
 
-	if (unlikely(IS_PRIVATE(d_backing_inode(dentry))))
+	if (unlikely(IS_PRIVATE(inode)))
 		return 0;
 
 	return avc_has_perm(sid, isec->sid, isec->sclass, file_to_av(file),
@@ -2280,7 +2217,7 @@ static int selinux_bprm_set_creds(struct linux_binprm *bprm)
 
 	old_tsec = current_security();
 	new_tsec = bprm->cred->security;
-	isec = inode_security(inode);
+	isec = inode->i_security;
 
 	/* Default to the current task SID. */
 	new_tsec->sid = old_tsec->sid;
@@ -2702,7 +2639,7 @@ static int selinux_sb_remount(struct super_block *sb, void *data)
 			break;
 		case ROOTCONTEXT_MNT: {
 			struct inode_security_struct *root_isec;
-			root_isec = backing_inode_security(sb->s_root);
+			root_isec = d_backing_inode(sb->s_root)->i_security;
 
 			if (bad_option(sbsec, ROOTCONTEXT_MNT, root_isec->sid, sid))
 				goto out_bad_option;
@@ -2816,11 +2753,13 @@ static int selinux_inode_init_security(struct inode *inode, struct inode *dir,
 				       void **value, size_t *len)
 {
 	const struct task_security_struct *tsec = current_security();
+	struct inode_security_struct *dsec;
 	struct superblock_security_struct *sbsec;
 	u32 sid, newsid, clen;
 	int rc;
 	char *context;
 
+	dsec = dir->i_security;
 	sbsec = dir->i_sb->s_security;
 
 	sid = tsec->sid;
@@ -2838,7 +2777,7 @@ static int selinux_inode_init_security(struct inode *inode, struct inode *dir,
 		struct inode_security_struct *isec = inode->i_security;
 		isec->sclass = inode_mode_to_security_class(inode->i_mode);
 		isec->sid = newsid;
-		isec->initialized = LABEL_INITIALIZED;
+		isec->initialized = 1;
 	}
 
 	if (!ss_initialized || !(sbsec->flags & SBLABEL_MNT))
@@ -2919,9 +2858,7 @@ static int selinux_inode_follow_link(struct dentry *dentry, struct inode *inode,
 	ad.type = LSM_AUDIT_DATA_DENTRY;
 	ad.u.dentry = dentry;
 	sid = cred_sid(cred);
-	isec = inode_security_rcu(inode, rcu);
-	if (IS_ERR(isec))
-		return PTR_ERR(isec);
+	isec = inode->i_security;
 
 	return avc_has_perm_flags(sid, isec->sid, isec->sclass, FILE__READ, &ad,
 				  rcu ? MAY_NOT_BLOCK : 0);
@@ -2973,9 +2910,7 @@ static int selinux_inode_permission(struct inode *inode, int mask)
 	perms = file_mask_to_av(inode->i_mode, mask);
 
 	sid = cred_sid(cred);
-	isec = inode_security_rcu(inode, flags & MAY_NOT_BLOCK);
-	if (IS_ERR(isec))
-		return PTR_ERR(isec);
+	isec = inode->i_security;
 
 	rc = avc_has_perm_noaudit(sid, isec->sid, isec->sclass, perms, 0, &avd);
 	audited = avc_audit_required(perms, &avd, rc,
@@ -3045,7 +2980,7 @@ static int selinux_inode_setxattr(struct dentry *dentry, const char *name,
 				  const void *value, size_t size, int flags)
 {
 	struct inode *inode = d_backing_inode(dentry);
-	struct inode_security_struct *isec = backing_inode_security(dentry);
+	struct inode_security_struct *isec = inode->i_security;
 	struct superblock_security_struct *sbsec;
 	struct common_audit_data ad;
 	u32 newsid, sid = current_sid();
@@ -3122,7 +3057,7 @@ static void selinux_inode_post_setxattr(struct dentry *dentry, const char *name,
 					int flags)
 {
 	struct inode *inode = d_backing_inode(dentry);
-	struct inode_security_struct *isec = backing_inode_security(dentry);
+	struct inode_security_struct *isec = inode->i_security;
 	u32 newsid;
 	int rc;
 
@@ -3141,7 +3076,7 @@ static void selinux_inode_post_setxattr(struct dentry *dentry, const char *name,
 
 	isec->sclass = inode_mode_to_security_class(inode->i_mode);
 	isec->sid = newsid;
-	isec->initialized = LABEL_INITIALIZED;
+	isec->initialized = 1;
 
 	return;
 }
@@ -3175,12 +3110,12 @@ static int selinux_inode_removexattr(struct dentry *dentry, const char *name)
  *
  * Permission check is handled by selinux_inode_getxattr hook.
  */
-static int selinux_inode_getsecurity(struct inode *inode, const char *name, void **buffer, bool alloc)
+static int selinux_inode_getsecurity(const struct inode *inode, const char *name, void **buffer, bool alloc)
 {
 	u32 size;
 	int error;
 	char *context = NULL;
-	struct inode_security_struct *isec = inode_security(inode);
+	struct inode_security_struct *isec = inode->i_security;
 
 	if (strcmp(name, XATTR_SELINUX_SUFFIX))
 		return -EOPNOTSUPP;
@@ -3219,7 +3154,7 @@ out_nofree:
 static int selinux_inode_setsecurity(struct inode *inode, const char *name,
 				     const void *value, size_t size, int flags)
 {
-	struct inode_security_struct *isec = inode_security(inode);
+	struct inode_security_struct *isec = inode->i_security;
 	u32 newsid;
 	int rc;
 
@@ -3235,7 +3170,7 @@ static int selinux_inode_setsecurity(struct inode *inode, const char *name,
 
 	isec->sclass = inode_mode_to_security_class(inode->i_mode);
 	isec->sid = newsid;
-	isec->initialized = LABEL_INITIALIZED;
+	isec->initialized = 1;
 	return 0;
 }
 
@@ -3247,9 +3182,9 @@ static int selinux_inode_listsecurity(struct inode *inode, char *buffer, size_t 
 	return len;
 }
 
-static void selinux_inode_getsecid(struct inode *inode, u32 *secid)
+static void selinux_inode_getsecid(const struct inode *inode, u32 *secid)
 {
-	struct inode_security_struct *isec = inode_security_novalidate(inode);
+	struct inode_security_struct *isec = inode->i_security;
 	*secid = isec->sid;
 }
 
@@ -3272,14 +3207,13 @@ static int selinux_file_permission(struct file *file, int mask)
 {
 	struct inode *inode = file_inode(file);
 	struct file_security_struct *fsec = file->f_security;
-	struct inode_security_struct *isec;
+	struct inode_security_struct *isec = inode->i_security;
 	u32 sid = current_sid();
 
 	if (!mask)
 		/* No permission to check.  Existence test. */
 		return 0;
 
-	isec = inode_security(inode);
 	if (sid == fsec->sid && fsec->isid == isec->sid &&
 	    fsec->pseqno == avc_policy_seqno())
 		/* No change since file_open check. */
@@ -3308,7 +3242,7 @@ static int ioctl_has_perm(const struct cred *cred, struct file *file,
 	struct common_audit_data ad;
 	struct file_security_struct *fsec = file->f_security;
 	struct inode *inode = file_inode(file);
-	struct inode_security_struct *isec = inode_security(inode);
+	struct inode_security_struct *isec = inode->i_security;
 	struct lsm_ioctlop_audit ioctl;
 	u32 ssid = cred_sid(cred);
 	int rc;
@@ -3572,7 +3506,7 @@ static int selinux_file_open(struct file *file, const struct cred *cred)
 	struct inode_security_struct *isec;
 
 	fsec = file->f_security;
-	isec = inode_security(file_inode(file));
+	isec = file_inode(file)->i_security;
 	/*
 	 * Save inode label and policy sequence number
 	 * at open-time so that selinux_file_permission
@@ -3690,7 +3624,7 @@ static int selinux_kernel_act_as(struct cred *new, u32 secid)
  */
 static int selinux_kernel_create_files_as(struct cred *new, struct inode *inode)
 {
-	struct inode_security_struct *isec = inode_security(inode);
+	struct inode_security_struct *isec = inode->i_security;
 	struct task_security_struct *tsec = new->security;
 	u32 sid = current_sid();
 	int ret;
@@ -3814,7 +3748,7 @@ static void selinux_task_to_inode(struct task_struct *p,
 	u32 sid = task_sid(p);
 
 	isec->sid = sid;
-	isec->initialized = LABEL_INITIALIZED;
+	isec->initialized = 1;
 }
 
 /* Returns error only if unable to parse addresses */
@@ -4131,7 +4065,7 @@ static int selinux_socket_post_create(struct socket *sock, int family,
 				      int type, int protocol, int kern)
 {
 	const struct task_security_struct *tsec = current_security();
-	struct inode_security_struct *isec = inode_security_novalidate(SOCK_INODE(sock));
+	struct inode_security_struct *isec = SOCK_INODE(sock)->i_security;
 	struct sk_security_struct *sksec;
 	int err = 0;
 
@@ -4145,7 +4079,7 @@ static int selinux_socket_post_create(struct socket *sock, int family,
 			return err;
 	}
 
-	isec->initialized = LABEL_INITIALIZED;
+	isec->initialized = 1;
 
 	if (sock->sk) {
 		sksec = sock->sk->sk_security;
@@ -4331,12 +4265,12 @@ static int selinux_socket_accept(struct socket *sock, struct socket *newsock)
 	if (err)
 		return err;
 
-	newisec = inode_security_novalidate(SOCK_INODE(newsock));
+	newisec = SOCK_INODE(newsock)->i_security;
 
-	isec = inode_security_novalidate(SOCK_INODE(sock));
+	isec = SOCK_INODE(sock)->i_security;
 	newisec->sclass = isec->sclass;
 	newisec->sid = isec->sid;
-	newisec->initialized = LABEL_INITIALIZED;
+	newisec->initialized = 1;
 
 	return 0;
 }
@@ -4671,8 +4605,7 @@ static void selinux_sk_getsecid(struct sock *sk, u32 *secid)
 
 static void selinux_sock_graft(struct sock *sk, struct socket *parent)
 {
-	struct inode_security_struct *isec =
-		inode_security_novalidate(SOCK_INODE(parent));
+	struct inode_security_struct *isec = SOCK_INODE(parent)->i_security;
 	struct sk_security_struct *sksec = sk->sk_security;
 
 	if (sk->sk_family == PF_INET || sk->sk_family == PF_INET6 ||
@@ -4852,12 +4785,11 @@ static int selinux_nlmsg_perm(struct sock *sk, struct sk_buff *skb)
 	err = selinux_nlmsg_lookup(sksec->sclass, nlh->nlmsg_type, &perm);
 	if (err) {
 		if (err == -EINVAL) {
-			pr_warn_ratelimited("SELinux: unrecognized netlink"
-			       " message: protocol=%hu nlmsg_type=%hu sclass=%s"
-			       " pig=%d comm=%s\n",
+			printk(KERN_WARNING
+			       "SELinux: unrecognized netlink message:"
+			       " protocol=%hu nlmsg_type=%hu sclass=%s\n",
 			       sk->sk_protocol, nlh->nlmsg_type,
-			       secclass_map[sksec->sclass - 1].name,
-			       task_pid_nr(current), current->comm);
+			       secclass_map[sksec->sclass - 1].name);
 			if (!selinux_enforcing || security_get_allow_unknown())
 				err = 0;
 		}
@@ -5830,15 +5762,6 @@ static void selinux_release_secctx(char *secdata, u32 seclen)
 	kfree(secdata);
 }
 
-static void selinux_inode_invalidate_secctx(struct inode *inode)
-{
-	struct inode_security_struct *isec = inode->i_security;
-
-	mutex_lock(&isec->lock);
-	isec->initialized = LABEL_INVALID;
-	mutex_unlock(&isec->lock);
-}
-
 /*
  *	called with inode->i_mutex locked
  */
@@ -6070,7 +5993,6 @@ static struct security_hook_list selinux_hooks[] = {
 	LSM_HOOK_INIT(secid_to_secctx, selinux_secid_to_secctx),
 	LSM_HOOK_INIT(secctx_to_secid, selinux_secctx_to_secid),
 	LSM_HOOK_INIT(release_secctx, selinux_release_secctx),
-	LSM_HOOK_INIT(inode_invalidate_secctx, selinux_inode_invalidate_secctx),
 	LSM_HOOK_INIT(inode_notifysecctx, selinux_inode_notifysecctx),
 	LSM_HOOK_INIT(inode_setsecctx, selinux_inode_setsecctx),
 	LSM_HOOK_INIT(inode_getsecctx, selinux_inode_getsecctx),

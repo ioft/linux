@@ -201,20 +201,23 @@ _next:
 
 		if (rtw_cmd_filter(pcmdpriv, pcmd) == _FAIL) {
 			pcmd->res = H2C_DROPPED;
-		} else {
-			if (pcmd->cmdcode < ARRAY_SIZE(wlancmds)) {
-			    cmd_hdl = wlancmds[pcmd->cmdcode].h2cfuns;
-
-				if (cmd_hdl) {
-					ret = cmd_hdl(pcmd->padapter, pcmd->parmbuf);
-					pcmd->res = ret;
-				}
-			} else {
-				pcmd->res = H2C_PARAMETERS_ERROR;
-			}
-
-			cmd_hdl = NULL;
+			goto post_process;
 		}
+
+		if (pcmd->cmdcode < ARRAY_SIZE(wlancmds)) {
+			cmd_hdl = wlancmds[pcmd->cmdcode].h2cfuns;
+
+			if (cmd_hdl) {
+				ret = cmd_hdl(pcmd->padapter, pcmd->parmbuf);
+				pcmd->res = ret;
+			}
+		} else {
+			pcmd->res = H2C_PARAMETERS_ERROR;
+		}
+
+		cmd_hdl = NULL;
+
+post_process:
 
 		/* call callback function for post-processed */
 		if (pcmd->cmdcode < ARRAY_SIZE(rtw_cmd_callback)) {
@@ -239,11 +242,15 @@ _next:
 	pcmdpriv->cmdthd_running = false;
 
 	/*  free all cmd_obj resources */
-	while ((pcmd = rtw_dequeue_cmd(&pcmdpriv->cmd_queue))) {
+	do {
+		pcmd = rtw_dequeue_cmd(&pcmdpriv->cmd_queue);
+		if (pcmd == NULL)
+			break;
+
 		/* DBG_88E("%s: leaving... drop cmdcode:%u\n", __func__, pcmd->cmdcode); */
 
 		rtw_free_cmd_obj(pcmd);
-	}
+	} while (1);
 
 	up(&pcmdpriv->terminate_cmdthread_sema);
 
@@ -563,19 +570,31 @@ u8 rtw_setopmode_cmd(struct adapter  *padapter, enum ndis_802_11_network_infra n
 	struct	setopmode_parm *psetop;
 
 	struct	cmd_priv   *pcmdpriv = &padapter->cmdpriv;
+	u8	res = _SUCCESS;
+
 
 	ph2c = kzalloc(sizeof(struct cmd_obj), GFP_KERNEL);
+	if (ph2c == NULL) {
+		res = false;
+		goto exit;
+	}
 	psetop = kzalloc(sizeof(struct setopmode_parm), GFP_KERNEL);
-	if (!ph2c || !psetop) {
+
+	if (psetop == NULL) {
 		kfree(ph2c);
-		kfree(psetop);
-		return false;
+		res = false;
+		goto exit;
 	}
 
 	init_h2fwcmd_w_parm_no_rsp(ph2c, psetop, _SetOpMode_CMD_);
 	psetop->mode = (u8)networktype;
 
-	return rtw_enqueue_cmd(pcmdpriv, ph2c);
+	res = rtw_enqueue_cmd(pcmdpriv, ph2c);
+
+exit:
+
+
+	return res;
 }
 
 u8 rtw_setstakey_cmd(struct adapter *padapter, u8 *psta, u8 unicast_key)
@@ -588,16 +607,28 @@ u8 rtw_setstakey_cmd(struct adapter *padapter, u8 *psta, u8 unicast_key)
 	struct mlme_priv *pmlmepriv = &padapter->mlmepriv;
 	struct security_priv *psecuritypriv = &padapter->securitypriv;
 	struct sta_info *sta = (struct sta_info *)psta;
+	u8	res = _SUCCESS;
+
 
 	ph2c = kzalloc(sizeof(struct cmd_obj), GFP_KERNEL);
-	psetstakey_para = kzalloc(sizeof(struct set_stakey_parm), GFP_KERNEL);
-	psetstakey_rsp = kzalloc(sizeof(struct set_stakey_rsp), GFP_KERNEL);
+	if (ph2c == NULL) {
+		res = _FAIL;
+		goto exit;
+	}
 
-	if (!ph2c || !psetstakey_para || !psetstakey_rsp) {
+	psetstakey_para = kzalloc(sizeof(struct set_stakey_parm), GFP_KERNEL);
+	if (psetstakey_para == NULL) {
+		kfree(ph2c);
+		res = _FAIL;
+		goto exit;
+	}
+
+	psetstakey_rsp = kzalloc(sizeof(struct set_stakey_rsp), GFP_KERNEL);
+	if (psetstakey_rsp == NULL) {
 		kfree(ph2c);
 		kfree(psetstakey_para);
-		kfree(psetstakey_rsp);
-		return _FAIL;
+		res = _FAIL;
+		goto exit;
 	}
 
 	init_h2fwcmd_w_parm_no_rsp(ph2c, psetstakey_para, _SetStaKey_CMD_);
@@ -619,7 +650,12 @@ u8 rtw_setstakey_cmd(struct adapter *padapter, u8 *psta, u8 unicast_key)
 	/* jeff: set this because at least sw key is ready */
 	padapter->securitypriv.busetkipkey = true;
 
-	return rtw_enqueue_cmd(pcmdpriv, ph2c);
+	res = rtw_enqueue_cmd(pcmdpriv, ph2c);
+
+exit:
+
+
+	return res;
 }
 
 u8 rtw_clearstakey_cmd(struct adapter *padapter, u8 *psta, u8 entry, u8 enqueue)
@@ -1050,19 +1086,31 @@ u8 rtw_ps_cmd(struct adapter *padapter)
 	struct drvextra_cmd_parm	*pdrvextra_cmd_parm;
 	struct cmd_priv	*pcmdpriv = &padapter->cmdpriv;
 
+	u8	res = _SUCCESS;
+
 	ppscmd = kzalloc(sizeof(struct cmd_obj), GFP_ATOMIC);
+	if (ppscmd == NULL) {
+		res = _FAIL;
+		goto exit;
+	}
+
 	pdrvextra_cmd_parm = kzalloc(sizeof(struct drvextra_cmd_parm), GFP_ATOMIC);
-	if (!ppscmd || !pdrvextra_cmd_parm) {
+	if (pdrvextra_cmd_parm == NULL) {
 		kfree(ppscmd);
-		kfree(pdrvextra_cmd_parm);
-		return _FAIL;
+		res = _FAIL;
+		goto exit;
 	}
 
 	pdrvextra_cmd_parm->ec_id = POWER_SAVING_CTRL_WK_CID;
 	pdrvextra_cmd_parm->pbuf = NULL;
 	init_h2fwcmd_w_parm_no_rsp(ppscmd, pdrvextra_cmd_parm, GEN_CMD_CODE(_Set_Drv_Extra));
 
-	return rtw_enqueue_cmd(pcmdpriv, ppscmd);
+	res = rtw_enqueue_cmd(pcmdpriv, ppscmd);
+
+exit:
+
+
+	return res;
 }
 
 #ifdef CONFIG_88EU_AP_MODE

@@ -12,7 +12,6 @@
 
 #include <linux/bitops.h>
 #include <linux/mtd/cfi.h>
-#include <linux/mtd/mtd.h>
 
 /*
  * Manufacturer IDs
@@ -118,11 +117,14 @@ enum spi_nor_option_flags {
 	SNOR_F_USE_FSR		= BIT(0),
 };
 
+struct mtd_info;
+
 /**
  * struct spi_nor - Structure for defining a the SPI NOR layer
  * @mtd:		point to a mtd_info structure
  * @lock:		the lock for the read/write/erase/lock/unlock operations
  * @dev:		point to a spi device, or a spi nor controller device.
+ * @flash_node:		point to a device node describing this flash instance.
  * @page_size:		the page size of the SPI NOR
  * @addr_width:		number of address bytes
  * @erase_opcode:	the opcode for erasing a sector
@@ -142,8 +144,7 @@ enum spi_nor_option_flags {
  * @read:		[DRIVER-SPECIFIC] read data from the SPI NOR
  * @write:		[DRIVER-SPECIFIC] write data to the SPI NOR
  * @erase:		[DRIVER-SPECIFIC] erase a sector of the SPI NOR
- *			at the offset @offs; if not provided by the driver,
- *			spi-nor will send the erase opcode via write_reg()
+ *			at the offset @offs
  * @flash_lock:		[FLASH-SPECIFIC] lock a region of the SPI NOR
  * @flash_unlock:	[FLASH-SPECIFIC] unlock a region of the SPI NOR
  * @flash_is_locked:	[FLASH-SPECIFIC] check if a region of the SPI NOR is
@@ -154,6 +155,7 @@ struct spi_nor {
 	struct mtd_info		mtd;
 	struct mutex		lock;
 	struct device		*dev;
+	struct device_node	*flash_node;
 	u32			page_size;
 	u8			addr_width;
 	u8			erase_opcode;
@@ -182,17 +184,6 @@ struct spi_nor {
 
 	void *priv;
 };
-
-static inline void spi_nor_set_flash_node(struct spi_nor *nor,
-					  struct device_node *np)
-{
-	mtd_set_of_node(&nor->mtd, np);
-}
-
-static inline struct device_node *spi_nor_get_flash_node(struct spi_nor *nor)
-{
-	return mtd_get_of_node(&nor->mtd);
-}
 
 /**
  * spi_nor_scan() - scan the SPI NOR

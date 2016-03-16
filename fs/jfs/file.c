@@ -38,17 +38,17 @@ int jfs_fsync(struct file *file, loff_t start, loff_t end, int datasync)
 	if (rc)
 		return rc;
 
-	inode_lock(inode);
+	mutex_lock(&inode->i_mutex);
 	if (!(inode->i_state & I_DIRTY_ALL) ||
 	    (datasync && !(inode->i_state & I_DIRTY_DATASYNC))) {
 		/* Make sure committed changes hit the disk */
 		jfs_flush_journal(JFS_SBI(inode->i_sb)->log, 1);
-		inode_unlock(inode);
+		mutex_unlock(&inode->i_mutex);
 		return rc;
 	}
 
 	rc |= jfs_commit_inode(inode, 1);
-	inode_unlock(inode);
+	mutex_unlock(&inode->i_mutex);
 
 	return rc ? -EIO : 0;
 }

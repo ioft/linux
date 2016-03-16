@@ -803,10 +803,6 @@ static int ahash_update_ctx(struct ahash_request *req)
 	if (to_hash) {
 		src_nents = sg_nents_for_len(req->src,
 					     req->nbytes - (*next_buflen));
-		if (src_nents < 0) {
-			dev_err(jrdev, "Invalid number of src SG.\n");
-			return src_nents;
-		}
 		sec4_sg_src_index = 1 + (*buflen ? 1 : 0);
 		sec4_sg_bytes = (sec4_sg_src_index + src_nents) *
 				 sizeof(struct sec4_sg_entry);
@@ -1006,10 +1002,6 @@ static int ahash_finup_ctx(struct ahash_request *req)
 	int sh_len;
 
 	src_nents = sg_nents_for_len(req->src, req->nbytes);
-	if (src_nents < 0) {
-		dev_err(jrdev, "Invalid number of src SG.\n");
-		return src_nents;
-	}
 	sec4_sg_src_index = 1 + (buflen ? 1 : 0);
 	sec4_sg_bytes = (sec4_sg_src_index + src_nents) *
 			 sizeof(struct sec4_sg_entry);
@@ -1094,10 +1086,6 @@ static int ahash_digest(struct ahash_request *req)
 	int sh_len;
 
 	src_nents = sg_count(req->src, req->nbytes);
-	if (src_nents < 0) {
-		dev_err(jrdev, "Invalid number of src SG.\n");
-		return src_nents;
-	}
 	dma_map_sg(jrdev, req->src, src_nents ? : 1, DMA_TO_DEVICE);
 	sec4_sg_bytes = src_nents * sizeof(struct sec4_sg_entry);
 
@@ -1246,10 +1234,6 @@ static int ahash_update_no_ctx(struct ahash_request *req)
 	if (to_hash) {
 		src_nents = sg_nents_for_len(req->src,
 					     req->nbytes - (*next_buflen));
-		if (src_nents < 0) {
-			dev_err(jrdev, "Invalid number of src SG.\n");
-			return src_nents;
-		}
 		sec4_sg_bytes = (1 + src_nents) *
 				sizeof(struct sec4_sg_entry);
 
@@ -1358,10 +1342,6 @@ static int ahash_finup_no_ctx(struct ahash_request *req)
 	int ret = 0;
 
 	src_nents = sg_nents_for_len(req->src, req->nbytes);
-	if (src_nents < 0) {
-		dev_err(jrdev, "Invalid number of src SG.\n");
-		return src_nents;
-	}
 	sec4_sg_src_index = 2;
 	sec4_sg_bytes = (sec4_sg_src_index + src_nents) *
 			 sizeof(struct sec4_sg_entry);
@@ -1450,10 +1430,6 @@ static int ahash_update_first(struct ahash_request *req)
 
 	if (to_hash) {
 		src_nents = sg_count(req->src, req->nbytes - (*next_buflen));
-		if (src_nents < 0) {
-			dev_err(jrdev, "Invalid number of src SG.\n");
-			return src_nents;
-		}
 		dma_map_sg(jrdev, req->src, src_nents ? : 1, DMA_TO_DEVICE);
 		sec4_sg_bytes = src_nents * sizeof(struct sec4_sg_entry);
 
@@ -1596,7 +1572,7 @@ static int ahash_export(struct ahash_request *req, void *out)
 		len = state->buflen_1;
 	} else {
 		buf = state->buf_0;
-		len = state->buflen_0;
+		len = state->buflen_1;
 	}
 
 	memcpy(export->buf, buf, len);

@@ -792,7 +792,7 @@ COMPAT_SYSCALL_DEFINE5(mount, const char __user *, dev_name,
 		       const void __user *, data)
 {
 	char *kernel_type;
-	void *options;
+	unsigned long data_page;
 	char *kernel_dev;
 	int retval;
 
@@ -806,25 +806,26 @@ COMPAT_SYSCALL_DEFINE5(mount, const char __user *, dev_name,
 	if (IS_ERR(kernel_dev))
 		goto out1;
 
-	options = copy_mount_options(data);
-	retval = PTR_ERR(options);
-	if (IS_ERR(options))
+	retval = copy_mount_options(data, &data_page);
+	if (retval < 0)
 		goto out2;
 
-	if (kernel_type && options) {
+	retval = -EINVAL;
+
+	if (kernel_type && data_page) {
 		if (!strcmp(kernel_type, NCPFS_NAME)) {
-			do_ncp_super_data_conv(options);
+			do_ncp_super_data_conv((void *)data_page);
 		} else if (!strcmp(kernel_type, NFS4_NAME)) {
-			retval = -EINVAL;
-			if (do_nfs4_super_data_conv(options))
+			if (do_nfs4_super_data_conv((void *) data_page))
 				goto out3;
 		}
 	}
 
-	retval = do_mount(kernel_dev, dir_name, kernel_type, flags, options);
+	retval = do_mount(kernel_dev, dir_name, kernel_type,
+			flags, (void*)data_page);
 
  out3:
-	kfree(options);
+	free_page(data_page);
  out2:
 	kfree(kernel_dev);
  out1:

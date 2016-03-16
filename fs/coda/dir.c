@@ -427,13 +427,13 @@ static int coda_readdir(struct file *coda_file, struct dir_context *ctx)
 	if (host_file->f_op->iterate) {
 		struct inode *host_inode = file_inode(host_file);
 
-		inode_lock(host_inode);
+		mutex_lock(&host_inode->i_mutex);
 		ret = -ENOENT;
 		if (!IS_DEADDIR(host_inode)) {
 			ret = host_file->f_op->iterate(host_file, ctx);
 			file_accessed(host_file);
 		}
-		inode_unlock(host_inode);
+		mutex_unlock(&host_inode->i_mutex);
 		return ret;
 	}
 	/* Venus: we must read Venus dirents from a file */

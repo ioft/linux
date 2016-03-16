@@ -220,7 +220,7 @@ static int mxs_phy_hw_init(struct mxs_phy *mxs_phy)
 /* Return true if the vbus is there */
 static bool mxs_phy_get_vbus_status(struct mxs_phy *mxs_phy)
 {
-	unsigned int vbus_value = 0;
+	unsigned int vbus_value;
 
 	if (!mxs_phy->regmap_anatop)
 		return false;

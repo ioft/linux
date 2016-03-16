@@ -306,7 +306,7 @@ xfs_qm_dqalloc(
 	xfs_fsblock_t	firstblock;
 	xfs_bmap_free_t flist;
 	xfs_bmbt_irec_t map;
-	int		nmaps, error;
+	int		nmaps, error, committed;
 	xfs_buf_t	*bp;
 	xfs_trans_t	*tp = *tpp;
 
@@ -379,12 +379,11 @@ xfs_qm_dqalloc(
 
 	xfs_trans_bhold(tp, bp);
 
-	error = xfs_bmap_finish(tpp, &flist, NULL);
-	if (error)
+	if ((error = xfs_bmap_finish(tpp, &flist, &committed))) {
 		goto error1;
+	}
 
-	/* Transaction was committed? */
-	if (*tpp != tp) {
+	if (committed) {
 		tp = *tpp;
 		xfs_trans_bjoin(tp, bp);
 	} else {
@@ -394,9 +393,9 @@ xfs_qm_dqalloc(
 	*O_bpp = bp;
 	return 0;
 
-error1:
+      error1:
 	xfs_bmap_cancel(&flist);
-error0:
+      error0:
 	xfs_iunlock(quotip, XFS_ILOCK_EXCL);
 
 	return error;

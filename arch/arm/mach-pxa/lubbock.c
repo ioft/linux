@@ -47,14 +47,14 @@
 
 #include <asm/hardware/sa1111.h>
 
-#include "pxa25x.h"
+#include <mach/pxa25x.h>
 #include <mach/audio.h>
 #include <mach/lubbock.h>
-#include "udc.h"
+#include <mach/udc.h>
 #include <linux/platform_data/irda-pxaficp.h>
 #include <linux/platform_data/video-pxafb.h>
 #include <linux/platform_data/mmc-pxamci.h>
-#include "pm.h"
+#include <mach/pm.h>
 #include <mach/smemc.h>
 
 #include "generic.h"

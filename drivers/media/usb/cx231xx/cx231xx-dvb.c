@@ -551,14 +551,10 @@ static int register_dvb(struct cx231xx_dvb *dvb,
 
 	/* register network adapter */
 	dvb_net_init(&dvb->adapter, &dvb->net, &dvb->demux.dmx);
-	result = dvb_create_media_graph(&dvb->adapter, false);
-	if (result < 0)
-		goto fail_create_graph;
+	dvb_create_media_graph(&dvb->adapter);
 
 	return 0;
 
-fail_create_graph:
-	dvb_net_release(&dvb->net);
 fail_fe_conn:
 	dvb->demux.dmx.remove_frontend(&dvb->demux.dmx, &dvb->fe_mem);
 fail_fe_mem:
@@ -729,7 +725,7 @@ static int dvb_init(struct cx231xx *dev)
 
 		dev->dvb->frontend = dvb_attach(lgdt3305_attach,
 						&hcw_lgdt3305_config,
-						demod_i2c);
+						tuner_i2c);
 
 		if (dev->dvb->frontend == NULL) {
 			dev_err(dev->dev,
@@ -750,7 +746,7 @@ static int dvb_init(struct cx231xx *dev)
 
 		dev->dvb->frontend = dvb_attach(si2165_attach,
 			&hauppauge_930C_HD_1113xx_si2165_config,
-			demod_i2c
+			tuner_i2c
 			);
 
 		if (dev->dvb->frontend == NULL) {
@@ -783,7 +779,7 @@ static int dvb_init(struct cx231xx *dev)
 
 		dev->dvb->frontend = dvb_attach(si2165_attach,
 			&pctv_quatro_stick_1114xx_si2165_config,
-			demod_i2c
+			tuner_i2c
 			);
 
 		if (dev->dvb->frontend == NULL) {
@@ -839,7 +835,7 @@ static int dvb_init(struct cx231xx *dev)
 
 		dev->dvb->frontend = dvb_attach(lgdt3306a_attach,
 			&hauppauge_955q_lgdt3306a_config,
-			demod_i2c
+			tuner_i2c
 			);
 
 		if (dev->dvb->frontend == NULL) {

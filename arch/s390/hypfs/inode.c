@@ -67,7 +67,7 @@ static void hypfs_remove(struct dentry *dentry)
 	struct dentry *parent;
 
 	parent = dentry->d_parent;
-	inode_lock(d_inode(parent));
+	mutex_lock(&d_inode(parent)->i_mutex);
 	if (simple_positive(dentry)) {
 		if (d_is_dir(dentry))
 			simple_rmdir(d_inode(parent), dentry);
@@ -76,7 +76,7 @@ static void hypfs_remove(struct dentry *dentry)
 	}
 	d_delete(dentry);
 	dput(dentry);
-	inode_unlock(d_inode(parent));
+	mutex_unlock(&d_inode(parent)->i_mutex);
 }
 
 static void hypfs_delete_tree(struct dentry *root)
@@ -331,7 +331,7 @@ static struct dentry *hypfs_create_file(struct dentry *parent, const char *name,
 	struct dentry *dentry;
 	struct inode *inode;
 
-	inode_lock(d_inode(parent));
+	mutex_lock(&d_inode(parent)->i_mutex);
 	dentry = lookup_one_len(name, parent, strlen(name));
 	if (IS_ERR(dentry)) {
 		dentry = ERR_PTR(-ENOMEM);
@@ -359,7 +359,7 @@ static struct dentry *hypfs_create_file(struct dentry *parent, const char *name,
 	d_instantiate(dentry, inode);
 	dget(dentry);
 fail:
-	inode_unlock(d_inode(parent));
+	mutex_unlock(&d_inode(parent)->i_mutex);
 	return dentry;
 }
 

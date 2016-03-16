@@ -406,11 +406,16 @@ static int gpio_fan_get_cur_state(struct thermal_cooling_device *cdev,
 				  unsigned long *state)
 {
 	struct gpio_fan_data *fan_data = cdev->devdata;
+	int r;
 
 	if (!fan_data)
 		return -EINVAL;
 
-	*state = fan_data->speed_index;
+	r = get_fan_speed_index(fan_data);
+	if (r < 0)
+		return r;
+
+	*state = r;
 	return 0;
 }
 

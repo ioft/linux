@@ -96,7 +96,6 @@ static inline void amdgpu_bo_unreserve(struct amdgpu_bo *bo)
  */
 static inline u64 amdgpu_bo_gpu_offset(struct amdgpu_bo *bo)
 {
-	WARN_ON_ONCE(bo->tbo.mem.mem_type == TTM_PL_SYSTEM);
 	return bo->tbo.offset;
 }
 

@@ -121,7 +121,7 @@ static void ima_check_last_writer(struct integrity_iint_cache *iint,
 	if (!(mode & FMODE_WRITE))
 		return;
 
-	inode_lock(inode);
+	mutex_lock(&inode->i_mutex);
 	if (atomic_read(&inode->i_writecount) == 1) {
 		if ((iint->version != inode->i_version) ||
 		    (iint->flags & IMA_NEW_FILE)) {
@@ -130,7 +130,7 @@ static void ima_check_last_writer(struct integrity_iint_cache *iint,
 				ima_update_xattr(iint, file);
 		}
 	}
-	inode_unlock(inode);
+	mutex_unlock(&inode->i_mutex);
 }
 
 /**
@@ -186,7 +186,7 @@ static int process_measurement(struct file *file, int mask, int function,
 	if (action & IMA_FILE_APPRAISE)
 		function = FILE_CHECK;
 
-	inode_lock(inode);
+	mutex_lock(&inode->i_mutex);
 
 	if (action) {
 		iint = integrity_inode_get(inode);
@@ -250,7 +250,7 @@ out_free:
 	if (pathbuf)
 		__putname(pathbuf);
 out:
-	inode_unlock(inode);
+	mutex_unlock(&inode->i_mutex);
 	if ((rc && must_appraise) && (ima_appraise & IMA_APPRAISE_ENFORCE))
 		return -EACCES;
 	return 0;

@@ -23,12 +23,7 @@
 
 static void ath10k_report_offchan_tx(struct ath10k *ar, struct sk_buff *skb)
 {
-	struct ieee80211_tx_info *info = IEEE80211_SKB_CB(skb);
-
-	if (likely(!(info->flags & IEEE80211_TX_CTL_TX_OFFCHAN)))
-		return;
-
-	if (ath10k_mac_tx_frm_has_freq(ar))
+	if (!ATH10K_SKB_CB(skb)->htt.is_offchan)
 		return;
 
 	/* If the original wait_for_completion() timed out before
@@ -57,6 +52,8 @@ void ath10k_txrx_tx_unref(struct ath10k_htt *htt,
 	struct ieee80211_tx_info *info;
 	struct ath10k_skb_cb *skb_cb;
 	struct sk_buff *msdu;
+	struct ieee80211_hdr *hdr;
+	__le16 fc;
 	bool limit_mgmt_desc = false;
 
 	ath10k_dbg(ar, ATH10K_DBG_HTT,
@@ -79,9 +76,10 @@ void ath10k_txrx_tx_unref(struct ath10k_htt *htt,
 		return;
 	}
 
-	skb_cb = ATH10K_SKB_CB(msdu);
+	hdr = (struct ieee80211_hdr *)msdu->data;
+	fc = hdr->frame_control;
 
-	if (unlikely(skb_cb->flags & ATH10K_SKB_F_MGMT) &&
+	if (unlikely(ieee80211_is_mgmt(fc)) &&
 	    ar->hw_params.max_probe_resp_desc_thres)
 		limit_mgmt_desc = true;
 
@@ -91,6 +89,7 @@ void ath10k_txrx_tx_unref(struct ath10k_htt *htt,
 		wake_up(&htt->empty_tx_wq);
 	spin_unlock_bh(&htt->tx_lock);
 
+	skb_cb = ATH10K_SKB_CB(msdu);
 	dma_unmap_single(dev, skb_cb->paddr, msdu->len, DMA_TO_DEVICE);
 
 	ath10k_report_offchan_tx(htt->ar, msdu);

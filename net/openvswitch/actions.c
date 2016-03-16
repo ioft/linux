@@ -1160,26 +1160,17 @@ int ovs_execute_actions(struct datapath *dp, struct sk_buff *skb,
 			const struct sw_flow_actions *acts,
 			struct sw_flow_key *key)
 {
-	static const int ovs_recursion_limit = 5;
-	int err, level;
+	int level = this_cpu_read(exec_actions_level);
+	int err;
 
-	level = __this_cpu_inc_return(exec_actions_level);
-	if (unlikely(level > ovs_recursion_limit)) {
-		net_crit_ratelimited("ovs: recursion limit reached on datapath %s, probable configuration error\n",
-				     ovs_dp_name(dp));
-		kfree_skb(skb);
-		err = -ENETDOWN;
-		goto out;
-	}
-
+	this_cpu_inc(exec_actions_level);
 	err = do_execute_actions(dp, skb, key,
 				 acts->actions, acts->actions_len);
 
-	if (level == 1)
+	if (!level)
 		process_deferred_actions(dp);
 
-out:
-	__this_cpu_dec(exec_actions_level);
+	this_cpu_dec(exec_actions_level);
 	return err;
 }
 

@@ -160,12 +160,6 @@ int usbnet_generic_cdc_bind(struct usbnet *dev, struct usb_interface *intf)
 	info->u = header.usb_cdc_union_desc;
 	info->header = header.usb_cdc_header_desc;
 	info->ether = header.usb_cdc_ether_desc;
-	if (!info->u) {
-		if (rndis)
-			goto skip;
-		else /* in that case a quirk is mandatory */
-			goto bad_desc;
-	}
 	/* we need a master/control interface (what we're
 	 * probed with) and a slave/data interface; union
 	 * descriptors sort this all out.
@@ -262,7 +256,7 @@ skip:
 			goto bad_desc;
 		}
 
-	} else if (!info->header || (!rndis && !info->ether)) {
+	} else if (!info->header || !info->u || (!rndis && !info->ether)) {
 		dev_dbg(&intf->dev, "missing cdc %s%s%sdescriptor\n",
 			info->header ? "" : "header ",
 			info->u ? "" : "union ",

@@ -116,7 +116,7 @@ void percpu_ref_reinit(struct percpu_ref *ref);
  */
 static inline void percpu_ref_kill(struct percpu_ref *ref)
 {
-	percpu_ref_kill_and_confirm(ref, NULL);
+	return percpu_ref_kill_and_confirm(ref, NULL);
 }
 
 /*

@@ -361,14 +361,13 @@ regcache_rbtree_node_alloc(struct regmap *map, unsigned int reg)
 		rbnode->base_reg = reg;
 	}
 
-	rbnode->block = kmalloc_array(rbnode->blklen, map->cache_word_size,
-				      GFP_KERNEL);
+	rbnode->block = kmalloc(rbnode->blklen * map->cache_word_size,
+				GFP_KERNEL);
 	if (!rbnode->block)
 		goto err_free;
 
-	rbnode->cache_present = kcalloc(BITS_TO_LONGS(rbnode->blklen),
-					sizeof(*rbnode->cache_present),
-					GFP_KERNEL);
+	rbnode->cache_present = kzalloc(BITS_TO_LONGS(rbnode->blklen) *
+		sizeof(*rbnode->cache_present), GFP_KERNEL);
 	if (!rbnode->cache_present)
 		goto err_free_block;
 
@@ -414,8 +413,8 @@ static int regcache_rbtree_write(struct regmap *map, unsigned int reg,
 		max = reg + max_dist;
 
 		/* look for an adjacent register to the one we are about to add */
-		node = rbtree_ctx->root.rb_node;
-		while (node) {
+		for (node = rb_first(&rbtree_ctx->root); node;
+		     node = rb_next(node)) {
 			rbnode_tmp = rb_entry(node, struct regcache_rbtree_node,
 					      node);
 
@@ -426,11 +425,6 @@ static int regcache_rbtree_write(struct regmap *map, unsigned int reg,
 				new_base_reg = min(reg, base_reg);
 				new_top_reg = max(reg, top_reg);
 			} else {
-				if (max < base_reg)
-					node = node->rb_left;
-				else
-					node = node->rb_right;
-
 				continue;
 			}
 

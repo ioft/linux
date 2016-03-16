@@ -100,7 +100,6 @@ static struct inode *get_cramfs_inode(struct super_block *sb,
 		break;
 	case S_IFLNK:
 		inode->i_op = &page_symlink_inode_operations;
-		inode_nohighmem(inode);
 		inode->i_data.a_ops = &cramfs_aops;
 		break;
 	default:

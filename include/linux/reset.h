@@ -38,9 +38,6 @@ static inline struct reset_control *devm_reset_control_get_optional(
 struct reset_control *of_reset_control_get(struct device_node *node,
 					   const char *id);
 
-struct reset_control *of_reset_control_get_by_index(
-					struct device_node *node, int index);
-
 #else
 
 static inline int reset_control_reset(struct reset_control *rstc)
@@ -74,7 +71,7 @@ static inline void reset_control_put(struct reset_control *rstc)
 
 static inline int device_reset_optional(struct device *dev)
 {
-	return -ENOTSUPP;
+	return -ENOSYS;
 }
 
 static inline struct reset_control *__must_check reset_control_get(
@@ -94,25 +91,19 @@ static inline struct reset_control *__must_check devm_reset_control_get(
 static inline struct reset_control *reset_control_get_optional(
 					struct device *dev, const char *id)
 {
-	return ERR_PTR(-ENOTSUPP);
+	return ERR_PTR(-ENOSYS);
 }
 
 static inline struct reset_control *devm_reset_control_get_optional(
 					struct device *dev, const char *id)
 {
-	return ERR_PTR(-ENOTSUPP);
+	return ERR_PTR(-ENOSYS);
 }
 
 static inline struct reset_control *of_reset_control_get(
 				struct device_node *node, const char *id)
 {
-	return ERR_PTR(-ENOTSUPP);
-}
-
-static inline struct reset_control *of_reset_control_get_by_index(
-				struct device_node *node, int index)
-{
-	return ERR_PTR(-ENOTSUPP);
+	return ERR_PTR(-ENOSYS);
 }
 
 #endif /* CONFIG_RESET_CONTROLLER */

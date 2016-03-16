@@ -436,7 +436,7 @@ static int ecryptfs_write_inode_size_to_xattr(struct inode *ecryptfs_inode)
 		rc = -ENOMEM;
 		goto out;
 	}
-	inode_lock(lower_inode);
+	mutex_lock(&lower_inode->i_mutex);
 	size = lower_inode->i_op->getxattr(lower_dentry, ECRYPTFS_XATTR_NAME,
 					   xattr_virt, PAGE_CACHE_SIZE);
 	if (size < 0)
@@ -444,7 +444,7 @@ static int ecryptfs_write_inode_size_to_xattr(struct inode *ecryptfs_inode)
 	put_unaligned_be64(i_size_read(ecryptfs_inode), xattr_virt);
 	rc = lower_inode->i_op->setxattr(lower_dentry, ECRYPTFS_XATTR_NAME,
 					 xattr_virt, size, 0);
-	inode_unlock(lower_inode);
+	mutex_unlock(&lower_inode->i_mutex);
 	if (rc)
 		printk(KERN_ERR "Error whilst attempting to write inode size "
 		       "to lower file xattr; rc = [%d]\n", rc);

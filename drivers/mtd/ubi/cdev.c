@@ -174,9 +174,9 @@ static int vol_cdev_fsync(struct file *file, loff_t start, loff_t end,
 	struct ubi_device *ubi = desc->vol->ubi;
 	struct inode *inode = file_inode(file);
 	int err;
-	inode_lock(inode);
+	mutex_lock(&inode->i_mutex);
 	err = ubi_sync(ubi->ubi_num);
-	inode_unlock(inode);
+	mutex_unlock(&inode->i_mutex);
 	return err;
 }
 

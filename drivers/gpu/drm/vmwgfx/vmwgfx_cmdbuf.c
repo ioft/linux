@@ -247,7 +247,7 @@ static void __vmw_cmdbuf_header_free(struct vmw_cmdbuf_header *header)
 {
 	struct vmw_cmdbuf_man *man = header->man;
 
-	lockdep_assert_held_once(&man->lock);
+	BUG_ON(!spin_is_locked(&man->lock));
 
 	if (header->inline_space) {
 		vmw_cmdbuf_header_inline_free(header);

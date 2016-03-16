@@ -14,7 +14,6 @@
 #include <linux/slab.h>
 #include <linux/init.h>
 #include <linux/device.h>
-#include <linux/mutex.h>
 #include <linux/pci.h>
 
 #include <asm/cio.h>
@@ -225,9 +224,8 @@ out_unreg:
 
 void chsc_chp_offline(struct chp_id chpid)
 {
-	struct channel_path *chp = chpid_to_chp(chpid);
-	struct chp_link link;
 	char dbf_txt[15];
+	struct chp_link link;
 
 	sprintf(dbf_txt, "chpr%x.%02x", chpid.cssid, chpid.id);
 	CIO_TRACE_EVENT(2, dbf_txt);
@@ -238,11 +236,6 @@ void chsc_chp_offline(struct chp_id chpid)
 	link.chpid = chpid;
 	/* Wait until previous actions have settled. */
 	css_wait_for_slow_path();
-
-	mutex_lock(&chp->lock);
-	chp_update_desc(chp);
-	mutex_unlock(&chp->lock);
-
 	for_each_subchannel_staged(s390_subchannel_remove_chpid, NULL, &link);
 }
 
@@ -697,9 +690,8 @@ static void chsc_process_crw(struct crw *crw0, struct crw *crw1, int overflow)
 
 void chsc_chp_online(struct chp_id chpid)
 {
-	struct channel_path *chp = chpid_to_chp(chpid);
-	struct chp_link link;
 	char dbf_txt[15];
+	struct chp_link link;
 
 	sprintf(dbf_txt, "cadd%x.%02x", chpid.cssid, chpid.id);
 	CIO_TRACE_EVENT(2, dbf_txt);
@@ -709,11 +701,6 @@ void chsc_chp_online(struct chp_id chpid)
 		link.chpid = chpid;
 		/* Wait until previous actions have settled. */
 		css_wait_for_slow_path();
-
-		mutex_lock(&chp->lock);
-		chp_update_desc(chp);
-		mutex_unlock(&chp->lock);
-
 		for_each_subchannel_staged(__s390_process_res_acc, NULL,
 					   &link);
 		css_schedule_reprobe();
@@ -980,19 +967,22 @@ static void
 chsc_initialize_cmg_chars(struct channel_path *chp, u8 cmcv,
 			  struct cmg_chars *chars)
 {
+	struct cmg_chars *cmg_chars;
 	int i, mask;
 
+	cmg_chars = chp->cmg_chars;
 	for (i = 0; i < NR_MEASUREMENT_CHARS; i++) {
 		mask = 0x80 >> (i + 3);
 		if (cmcv & mask)
-			chp->cmg_chars.values[i] = chars->values[i];
+			cmg_chars->values[i] = chars->values[i];
 		else
-			chp->cmg_chars.values[i] = 0;
+			cmg_chars->values[i] = 0;
 	}
 }
 
 int chsc_get_channel_measurement_chars(struct channel_path *chp)
 {
+	struct cmg_chars *cmg_chars;
 	int ccode, ret;
 
 	struct {
@@ -1016,11 +1006,10 @@ int chsc_get_channel_measurement_chars(struct channel_path *chp)
 		u32 data[NR_MEASUREMENT_CHARS];
 	} __attribute__ ((packed)) *scmc_area;
 
-	chp->shared = -1;
-	chp->cmg = -1;
-
-	if (!css_chsc_characteristics.scmc || !css_chsc_characteristics.secm)
-		return 0;
+	chp->cmg_chars = NULL;
+	cmg_chars = kmalloc(sizeof(*cmg_chars), GFP_KERNEL);
+	if (!cmg_chars)
+		return -ENOMEM;
 
 	spin_lock_irq(&chsc_page_lock);
 	memset(chsc_page, 0, PAGE_SIZE);
@@ -1042,19 +1031,25 @@ int chsc_get_channel_measurement_chars(struct channel_path *chp)
 			      scmc_area->response.code);
 		goto out;
 	}
-	if (scmc_area->not_valid)
+	if (scmc_area->not_valid) {
+		chp->cmg = -1;
+		chp->shared = -1;
 		goto out;
-
+	}
 	chp->cmg = scmc_area->cmg;
 	chp->shared = scmc_area->shared;
 	if (chp->cmg != 2 && chp->cmg != 3) {
 		/* No cmg-dependent data. */
 		goto out;
 	}
+	chp->cmg_chars = cmg_chars;
 	chsc_initialize_cmg_chars(chp, scmc_area->cmcv,
 				  (struct cmg_chars *) &scmc_area->data);
 out:
 	spin_unlock_irq(&chsc_page_lock);
+	if (!chp->cmg_chars)
+		kfree(cmg_chars);
+
 	return ret;
 }
 

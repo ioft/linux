@@ -164,7 +164,8 @@ void do_softirq_own_stack(void)
 {
 	unsigned long old, new;
 
-	old = current_stack_pointer();
+	/* Get current stack pointer. */
+	asm volatile("la %0,0(15)" : "=a" (old));
 	/* Check against async. stack address range. */
 	new = S390_lowcore.async_stack;
 	if (((new - old) >> (PAGE_SHIFT + THREAD_ORDER)) != 0) {

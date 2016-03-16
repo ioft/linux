@@ -12,7 +12,7 @@
 #include "util/tool.h"
 #include "util/callchain.h"
 
-#include <subcmd/parse-options.h>
+#include "util/parse-options.h"
 #include "util/trace-event.h"
 #include "util/data.h"
 #include "util/cpumap.h"
@@ -1834,7 +1834,7 @@ static int __cmd_record(int argc, const char **argv)
 	return cmd_record(i, rec_argv, NULL);
 }
 
-static int kmem_config(const char *var, const char *value, void *cb __maybe_unused)
+static int kmem_config(const char *var, const char *value, void *cb)
 {
 	if (!strcmp(var, "kmem.default")) {
 		if (!strcmp(value, "slab"))
@@ -1847,7 +1847,7 @@ static int kmem_config(const char *var, const char *value, void *cb __maybe_unus
 		return 0;
 	}
 
-	return 0;
+	return perf_default_config(var, value, cb);
 }
 
 int cmd_kmem(int argc, const char **argv, const char *prefix __maybe_unused)

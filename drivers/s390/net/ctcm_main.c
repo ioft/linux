@@ -1677,8 +1677,11 @@ static int ctcm_shutdown_device(struct ccwgroup_device *cgdev)
 
 	ccw_device_set_offline(cgdev->cdev[1]);
 	ccw_device_set_offline(cgdev->cdev[0]);
-	channel_remove(priv->channel[CTCM_READ]);
-	channel_remove(priv->channel[CTCM_WRITE]);
+
+	if (priv->channel[CTCM_READ])
+		channel_remove(priv->channel[CTCM_READ]);
+	if (priv->channel[CTCM_WRITE])
+		channel_remove(priv->channel[CTCM_WRITE]);
 	priv->channel[CTCM_READ] = priv->channel[CTCM_WRITE] = NULL;
 
 	return 0;

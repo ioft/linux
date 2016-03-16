@@ -50,7 +50,8 @@ prototypes:
 	int (*rename2) (struct inode *, struct dentry *,
 			struct inode *, struct dentry *, unsigned int);
 	int (*readlink) (struct dentry *, char __user *,int);
-	const char *(*get_link) (struct dentry *, struct inode *, void **);
+	const char *(*follow_link) (struct dentry *, void **);
+	void (*put_link) (struct inode *, void *);
 	void (*truncate) (struct inode *);
 	int (*permission) (struct inode *, int, unsigned int);
 	int (*get_acl)(struct inode *, int);
@@ -82,7 +83,8 @@ rmdir:		yes (both)	(see below)
 rename:		yes (all)	(see below)
 rename2:	yes (all)	(see below)
 readlink:	no
-get_link:	no
+follow_link:	no
+put_link:	no
 setattr:	yes
 permission:	no (may not block if called in rcu-walk mode)
 get_acl:	no

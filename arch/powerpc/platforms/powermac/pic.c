@@ -258,14 +258,13 @@ static unsigned int pmac_pic_get_irq(void)
 #ifdef CONFIG_XMON
 static struct irqaction xmon_action = {
 	.handler	= xmon_irq,
-	.flags		= IRQF_NO_THREAD,
+	.flags		= 0,
 	.name		= "NMI - XMON"
 };
 #endif
 
 static struct irqaction gatwick_cascade_action = {
 	.handler	= gatwick_action,
-	.flags		= IRQF_NO_THREAD,
 	.name		= "cascade",
 };
 

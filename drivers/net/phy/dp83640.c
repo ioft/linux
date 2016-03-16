@@ -220,10 +220,9 @@ static void rx_timestamp_work(struct work_struct *work);
 
 #define BROADCAST_ADDR 31
 
-static inline int broadcast_write(struct phy_device *phydev, u32 regnum,
-				  u16 val)
+static inline int broadcast_write(struct mii_bus *bus, u32 regnum, u16 val)
 {
-	return mdiobus_write(phydev->mdio.bus, BROADCAST_ADDR, regnum, val);
+	return mdiobus_write(bus, BROADCAST_ADDR, regnum, val);
 }
 
 /* Caller must hold extreg_lock. */
@@ -233,7 +232,7 @@ static int ext_read(struct phy_device *phydev, int page, u32 regnum)
 	int val;
 
 	if (dp83640->clock->page != page) {
-		broadcast_write(phydev, PAGESEL, page);
+		broadcast_write(phydev->bus, PAGESEL, page);
 		dp83640->clock->page = page;
 	}
 	val = phy_read(phydev, regnum);
@@ -248,11 +247,11 @@ static void ext_write(int broadcast, struct phy_device *phydev,
 	struct dp83640_private *dp83640 = phydev->priv;
 
 	if (dp83640->clock->page != page) {
-		broadcast_write(phydev, PAGESEL, page);
+		broadcast_write(phydev->bus, PAGESEL, page);
 		dp83640->clock->page = page;
 	}
 	if (broadcast)
-		broadcast_write(phydev, regnum, val);
+		broadcast_write(phydev->bus, regnum, val);
 	else
 		phy_write(phydev, regnum, val);
 }
@@ -846,11 +845,6 @@ static void decode_rxts(struct dp83640_private *dp83640,
 	struct skb_shared_hwtstamps *shhwtstamps = NULL;
 	struct sk_buff *skb;
 	unsigned long flags;
-	u8 overflow;
-
-	overflow = (phy_rxts->ns_hi >> 14) & 0x3;
-	if (overflow)
-		pr_debug("rx timestamp queue overflow, count %d\n", overflow);
 
 	spin_lock_irqsave(&dp83640->rx_lock, flags);
 
@@ -893,7 +887,6 @@ static void decode_txts(struct dp83640_private *dp83640,
 	struct skb_shared_hwtstamps shhwtstamps;
 	struct sk_buff *skb;
 	u64 ns;
-	u8 overflow;
 
 	/* We must already have the skb that triggered this. */
 
@@ -903,17 +896,6 @@ static void decode_txts(struct dp83640_private *dp83640,
 		pr_debug("have timestamp but tx_queue empty\n");
 		return;
 	}
-
-	overflow = (phy_txts->ns_hi >> 14) & 0x3;
-	if (overflow) {
-		pr_debug("tx timestamp queue overflow, count %d\n", overflow);
-		while (skb) {
-			skb_complete_tx_timestamp(skb, NULL);
-			skb = skb_dequeue(&dp83640->tx_queue);
-		}
-		return;
-	}
-
 	ns = phy2txts(phy_txts);
 	memset(&shhwtstamps, 0, sizeof(shhwtstamps));
 	shhwtstamps.hwtstamp = ns_to_ktime(ns);
@@ -1057,7 +1039,7 @@ static int choose_this_phy(struct dp83640_clock *clock,
 	if (chosen_phy == -1 && !clock->chosen)
 		return 1;
 
-	if (chosen_phy == phydev->mdio.addr)
+	if (chosen_phy == phydev->addr)
 		return 1;
 
 	return 0;
@@ -1121,10 +1103,10 @@ static int dp83640_probe(struct phy_device *phydev)
 	struct dp83640_private *dp83640;
 	int err = -ENOMEM, i;
 
-	if (phydev->mdio.addr == BROADCAST_ADDR)
+	if (phydev->addr == BROADCAST_ADDR)
 		return 0;
 
-	clock = dp83640_clock_get_bus(phydev->mdio.bus);
+	clock = dp83640_clock_get_bus(phydev->bus);
 	if (!clock)
 		goto no_clock;
 
@@ -1150,8 +1132,7 @@ static int dp83640_probe(struct phy_device *phydev)
 
 	if (choose_this_phy(clock, phydev)) {
 		clock->chosen = dp83640;
-		clock->ptp_clock = ptp_clock_register(&clock->caps,
-						      &phydev->mdio.dev);
+		clock->ptp_clock = ptp_clock_register(&clock->caps, &phydev->dev);
 		if (IS_ERR(clock->ptp_clock)) {
 			err = PTR_ERR(clock->ptp_clock);
 			goto no_register;
@@ -1177,7 +1158,7 @@ static void dp83640_remove(struct phy_device *phydev)
 	struct list_head *this, *next;
 	struct dp83640_private *tmp, *dp83640 = phydev->priv;
 
-	if (phydev->mdio.addr == BROADCAST_ADDR)
+	if (phydev->addr == BROADCAST_ADDR)
 		return;
 
 	enable_status_frames(phydev, false);
@@ -1509,11 +1490,12 @@ static struct phy_driver dp83640_driver = {
 	.hwtstamp	= dp83640_hwtstamp,
 	.rxtstamp	= dp83640_rxtstamp,
 	.txtstamp	= dp83640_txtstamp,
+	.driver		= {.owner = THIS_MODULE,}
 };
 
 static int __init dp83640_init(void)
 {
-	return phy_driver_register(&dp83640_driver, THIS_MODULE);
+	return phy_driver_register(&dp83640_driver);
 }
 
 static void __exit dp83640_exit(void)

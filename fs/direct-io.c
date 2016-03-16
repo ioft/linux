@@ -472,8 +472,8 @@ static int dio_bio_complete(struct dio *dio, struct bio *bio)
 		dio->io_error = -EIO;
 
 	if (dio->is_async && dio->rw == READ && dio->should_dirty) {
-		err = bio->bi_error;
 		bio_check_pages_dirty(bio);	/* transfers ownership */
+		err = bio->bi_error;
 	} else {
 		bio_for_each_segment_all(bvec, bio, i) {
 			struct page *page = bvec->bv_page;
@@ -1157,12 +1157,12 @@ do_blockdev_direct_IO(struct kiocb *iocb, struct inode *inode,
 					iocb->ki_filp->f_mapping;
 
 			/* will be released by direct_io_worker */
-			inode_lock(inode);
+			mutex_lock(&inode->i_mutex);
 
 			retval = filemap_write_and_wait_range(mapping, offset,
 							      end - 1);
 			if (retval) {
-				inode_unlock(inode);
+				mutex_unlock(&inode->i_mutex);
 				kmem_cache_free(dio_cache, dio);
 				goto out;
 			}
@@ -1173,7 +1173,7 @@ do_blockdev_direct_IO(struct kiocb *iocb, struct inode *inode,
 	dio->i_size = i_size_read(inode);
 	if (iov_iter_rw(iter) == READ && offset >= dio->i_size) {
 		if (dio->flags & DIO_LOCKING)
-			inode_unlock(inode);
+			mutex_unlock(&inode->i_mutex);
 		kmem_cache_free(dio_cache, dio);
 		retval = 0;
 		goto out;
@@ -1295,7 +1295,7 @@ do_blockdev_direct_IO(struct kiocb *iocb, struct inode *inode,
 	 * of protecting us from looking up uninitialized blocks.
 	 */
 	if (iov_iter_rw(iter) == READ && (dio->flags & DIO_LOCKING))
-		inode_unlock(dio->inode);
+		mutex_unlock(&dio->inode->i_mutex);
 
 	/*
 	 * The only time we want to leave bios in flight is when a successful

@@ -1414,8 +1414,7 @@ static void usbhsh_pipe_init_for_host(struct usbhs_priv *priv)
 {
 	struct usbhsh_hpriv *hpriv = usbhsh_priv_to_hpriv(priv);
 	struct usbhs_pipe *pipe;
-	struct renesas_usbhs_driver_pipe_config *pipe_configs =
-					usbhs_get_dparam(priv, pipe_configs);
+	u32 *pipe_type = usbhs_get_dparam(priv, pipe_type);
 	int pipe_size = usbhs_get_dparam(priv, pipe_size);
 	int old_type, dir_in, i;
 
@@ -1443,15 +1442,15 @@ static void usbhsh_pipe_init_for_host(struct usbhs_priv *priv)
 		 * USB_ENDPOINT_XFER_BULK -> dir in
 		 * ...
 		 */
-		dir_in = (pipe_configs[i].type == old_type);
-		old_type = pipe_configs[i].type;
+		dir_in = (pipe_type[i] == old_type);
+		old_type = pipe_type[i];
 
-		if (USB_ENDPOINT_XFER_CONTROL == pipe_configs[i].type) {
+		if (USB_ENDPOINT_XFER_CONTROL == pipe_type[i]) {
 			pipe = usbhs_dcp_malloc(priv);
 			usbhsh_hpriv_to_dcp(hpriv) = pipe;
 		} else {
 			pipe = usbhs_pipe_malloc(priv,
-						 pipe_configs[i].type,
+						 pipe_type[i],
 						 dir_in);
 		}
 

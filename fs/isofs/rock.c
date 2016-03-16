@@ -687,7 +687,7 @@ static int rock_ridge_symlink_readpage(struct file *file, struct page *page)
 	struct inode *inode = page->mapping->host;
 	struct iso_inode_info *ei = ISOFS_I(inode);
 	struct isofs_sb_info *sbi = ISOFS_SB(inode->i_sb);
-	char *link = page_address(page);
+	char *link = kmap(page);
 	unsigned long bufsize = ISOFS_BUFFER_SIZE(inode);
 	struct buffer_head *bh;
 	char *rpnt = link;
@@ -774,6 +774,7 @@ repeat:
 	brelse(bh);
 	*rpnt = '\0';
 	SetPageUptodate(page);
+	kunmap(page);
 	unlock_page(page);
 	return 0;
 
@@ -790,6 +791,7 @@ fail:
 	brelse(bh);
 error:
 	SetPageError(page);
+	kunmap(page);
 	unlock_page(page);
 	return -EIO;
 }

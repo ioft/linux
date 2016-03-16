@@ -20,7 +20,6 @@
 #include <linux/edac.h>
 #include <linux/smp.h>
 #include <linux/gfp.h>
-#include <linux/fsl/edac.h>
 
 #include <linux/of_platform.h>
 #include <linux/of_device.h>
@@ -239,12 +238,10 @@ static irqreturn_t mpc85xx_pci_isr(int irq, void *dev_id)
 	return IRQ_HANDLED;
 }
 
-static int mpc85xx_pci_err_probe(struct platform_device *op)
+int mpc85xx_pci_err_probe(struct platform_device *op)
 {
 	struct edac_pci_ctl_info *pci;
 	struct mpc85xx_pci_pdata *pdata;
-	struct mpc85xx_edac_pci_plat_data *plat_data;
-	struct device_node *of_node;
 	struct resource r;
 	int res = 0;
 
@@ -269,15 +266,7 @@ static int mpc85xx_pci_err_probe(struct platform_device *op)
 	pdata->name = "mpc85xx_pci_err";
 	pdata->irq = NO_IRQ;
 
-	plat_data = op->dev.platform_data;
-	if (!plat_data) {
-		dev_err(&op->dev, "no platform data");
-		res = -ENXIO;
-		goto err;
-	}
-	of_node = plat_data->of_node;
-
-	if (mpc85xx_pcie_find_capability(of_node) > 0)
+	if (mpc85xx_pcie_find_capability(op->dev.of_node) > 0)
 		pdata->is_pcie = true;
 
 	dev_set_drvdata(&op->dev, pci);
@@ -295,7 +284,7 @@ static int mpc85xx_pci_err_probe(struct platform_device *op)
 
 	pdata->edac_idx = edac_pci_idx++;
 
-	res = of_address_to_resource(of_node, 0, &r);
+	res = of_address_to_resource(op->dev.of_node, 0, &r);
 	if (res) {
 		printk(KERN_ERR "%s: Unable to get resource for "
 		       "PCI err regs\n", __func__);
@@ -350,7 +339,7 @@ static int mpc85xx_pci_err_probe(struct platform_device *op)
 	}
 
 	if (edac_op_state == EDAC_OPSTATE_INT) {
-		pdata->irq = irq_of_parse_and_map(of_node, 0);
+		pdata->irq = irq_of_parse_and_map(op->dev.of_node, 0);
 		res = devm_request_irq(&op->dev, pdata->irq,
 				       mpc85xx_pci_isr,
 				       IRQF_SHARED,
@@ -397,22 +386,8 @@ err:
 	devres_release_group(&op->dev, mpc85xx_pci_err_probe);
 	return res;
 }
+EXPORT_SYMBOL(mpc85xx_pci_err_probe);
 
-static const struct platform_device_id mpc85xx_pci_err_match[] = {
-	{
-		.name = "mpc85xx-pci-edac"
-	},
-	{}
-};
-
-static struct platform_driver mpc85xx_pci_err_driver = {
-	.probe = mpc85xx_pci_err_probe,
-	.id_table = mpc85xx_pci_err_match,
-	.driver = {
-		.name = "mpc85xx_pci_err",
-		.suppress_bind_attrs = true,
-	},
-};
 #endif				/* CONFIG_PCI */
 
 /**************************** L2 Err device ***************************/
@@ -1233,18 +1208,10 @@ static void __init mpc85xx_mc_clear_rfxe(void *data)
 }
 #endif
 
-static struct platform_driver * const drivers[] = {
-	&mpc85xx_mc_err_driver,
-	&mpc85xx_l2_err_driver,
-#ifdef CONFIG_PCI
-	&mpc85xx_pci_err_driver,
-#endif
-};
-
 static int __init mpc85xx_mc_init(void)
 {
 	int res = 0;
-	u32 __maybe_unused pvr = 0;
+	u32 pvr = 0;
 
 	printk(KERN_INFO "Freescale(R) MPC85xx EDAC driver, "
 	       "(C) 2006 Montavista Software\n");
@@ -1259,9 +1226,13 @@ static int __init mpc85xx_mc_init(void)
 		break;
 	}
 
-	res = platform_register_drivers(drivers, ARRAY_SIZE(drivers));
+	res = platform_driver_register(&mpc85xx_mc_err_driver);
 	if (res)
-		printk(KERN_WARNING EDAC_MOD_STR "drivers fail to register\n");
+		printk(KERN_WARNING EDAC_MOD_STR "MC fails to register\n");
+
+	res = platform_driver_register(&mpc85xx_l2_err_driver);
+	if (res)
+		printk(KERN_WARNING EDAC_MOD_STR "L2 fails to register\n");
 
 #ifdef CONFIG_FSL_SOC_BOOKE
 	pvr = mfspr(SPRN_PVR);
@@ -1299,7 +1270,8 @@ static void __exit mpc85xx_mc_exit(void)
 		on_each_cpu(mpc85xx_mc_restore_hid1, NULL, 0);
 	}
 #endif
-	platform_unregister_drivers(drivers, ARRAY_SIZE(drivers));
+	platform_driver_unregister(&mpc85xx_l2_err_driver);
+	platform_driver_unregister(&mpc85xx_mc_err_driver);
 }
 
 module_exit(mpc85xx_mc_exit);

@@ -1587,7 +1587,8 @@ out:
 	return 0;
 
 error:
-	module_put(iface->mod);
+	if (iface->mod)
+		module_put(iface->mod);
 	modref--;
 	mutex_unlock(&c->start_mutex);
 	return ret;

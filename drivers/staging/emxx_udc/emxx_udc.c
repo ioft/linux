@@ -823,7 +823,7 @@ static int _nbu2ss_out_dma(
 	u32		length
 )
 {
-	dma_addr_t	pBuffer;
+	u8		*pBuffer;
 	u32		mpkt;
 	u32		lmpkt;
 	u32		dmacnt;
@@ -836,7 +836,7 @@ static int _nbu2ss_out_dma(
 		return 1;		/* DMA is forwarded */
 
 	req->dma_flag = TRUE;
-	pBuffer = req->req.dma;
+	pBuffer = (u8 *)req->req.dma;
 	pBuffer += req->req.actual;
 
 	/* DMA Address */
@@ -1034,7 +1034,7 @@ static int _nbu2ss_in_dma(
 	u32		length
 )
 {
-	dma_addr_t	pBuffer;
+	u8		*pBuffer;
 	u32		mpkt;		/* MaxPacketSize */
 	u32		lmpkt;		/* Last Packet Data Size */
 	u32		dmacnt;		/* IN Data Size */
@@ -1080,7 +1080,7 @@ static int _nbu2ss_in_dma(
 	_nbu2ss_writel(&preg->EP_DCR[num].EP_DCR2, data);
 
 	/* Address setting */
-	pBuffer = req->req.dma;
+	pBuffer = (u8 *)req->req.dma;
 	pBuffer += req->req.actual;
 	_nbu2ss_writel(&preg->EP_DCR[num].EP_TADR, (u32)pBuffer);
 
@@ -1285,7 +1285,11 @@ static void _nbu2ss_restert_transfer(struct nbu2ss_ep *ep)
 	bool	bflag = FALSE;
 	struct nbu2ss_req *req;
 
-	req = list_first_entry_or_null(&ep->queue, struct nbu2ss_req, queue);
+	if (list_empty(&ep->queue))
+		req = NULL;
+	else
+		req = list_entry(ep->queue.next, struct nbu2ss_req, queue);
+
 	if (!req)
 		return;
 
@@ -1780,7 +1784,11 @@ static inline int _nbu2ss_ep0_in_data_stage(struct nbu2ss_udc *udc)
 	struct nbu2ss_req	*req;
 	struct nbu2ss_ep	*ep = &udc->ep[0];
 
-	req = list_first_entry_or_null(&ep->queue, struct nbu2ss_req, queue);
+	if (list_empty(&ep->queue))
+		req = NULL;
+	else
+		req = list_entry(ep->queue.next, struct nbu2ss_req, queue);
+
 	if (!req)
 		req = &udc->ep0_req;
 
@@ -1803,7 +1811,11 @@ static inline int _nbu2ss_ep0_out_data_stage(struct nbu2ss_udc *udc)
 	struct nbu2ss_req	*req;
 	struct nbu2ss_ep	*ep = &udc->ep[0];
 
-	req = list_first_entry_or_null(&ep->queue, struct nbu2ss_req, queue);
+	if (list_empty(&ep->queue))
+		req = NULL;
+	else
+		req = list_entry(ep->queue.next, struct nbu2ss_req, queue);
+
 	if (!req)
 		req = &udc->ep0_req;
 
@@ -1826,7 +1838,11 @@ static inline int _nbu2ss_ep0_status_stage(struct nbu2ss_udc *udc)
 	struct nbu2ss_req	*req;
 	struct nbu2ss_ep	*ep = &udc->ep[0];
 
-	req = list_first_entry_or_null(&ep->queue, struct nbu2ss_req, queue);
+	if (list_empty(&ep->queue))
+		req = NULL;
+	else
+		req = list_entry(ep->queue.next, struct nbu2ss_req, queue);
+
 	if (!req) {
 		req = &udc->ep0_req;
 		if (req->req.complete)
@@ -2129,7 +2145,11 @@ static inline void _nbu2ss_epn_int(struct nbu2ss_udc *udc, u32 epnum)
 	/* Interrupt Clear */
 	_nbu2ss_writel(&udc->p_regs->EP_REGS[num].EP_STATUS, ~(u32)status);
 
-	req = list_first_entry_or_null(&ep->queue, struct nbu2ss_req, queue);
+	if (list_empty(&ep->queue))
+		req = NULL;
+	else
+		req = list_entry(ep->queue.next, struct nbu2ss_req, queue);
+
 	if (!req) {
 		/* pr_warn("=== %s(%d) req == NULL\n", __func__, epnum); */
 		return;
@@ -2708,7 +2728,7 @@ static int nbu2ss_ep_queue(
 	spin_lock_irqsave(&udc->lock, flags);
 
 #ifdef USE_DMA
-	if ((uintptr_t)req->req.buf & 0x3)
+	if ((u32)req->req.buf & 0x3)
 		req->unaligned = TRUE;
 	else
 		req->unaligned = FALSE;

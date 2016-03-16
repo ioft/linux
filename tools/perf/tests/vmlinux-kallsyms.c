@@ -18,7 +18,7 @@ static int vmlinux_matches_kallsyms_filter(struct map *map __maybe_unused,
 
 #define UM(x) kallsyms_map->unmap_ip(kallsyms_map, (x))
 
-int test__vmlinux_matches_kallsyms(int subtest __maybe_unused)
+int test__vmlinux_matches_kallsyms(void)
 {
 	int err = -1;
 	struct rb_node *nd;
@@ -110,6 +110,7 @@ int test__vmlinux_matches_kallsyms(int subtest __maybe_unused)
 	 */
 	for (nd = rb_first(&vmlinux_map->dso->symbols[type]); nd; nd = rb_next(nd)) {
 		struct symbol *pair, *first_pair;
+		bool backwards = true;
 
 		sym  = rb_entry(nd, struct symbol, rb_node);
 
@@ -150,14 +151,27 @@ next_pair:
 				continue;
 
 			} else {
-				pair = machine__find_kernel_symbol_by_name(&kallsyms, type, sym->name, NULL, NULL);
-				if (pair) {
-					if (UM(pair->start) == mem_start)
-						goto next_pair;
+				struct rb_node *nnd;
+detour:
+				nnd = backwards ? rb_prev(&pair->rb_node) :
+						  rb_next(&pair->rb_node);
+				if (nnd) {
+					struct symbol *next = rb_entry(nnd, struct symbol, rb_node);
 
-					pr_debug("%#" PRIx64 ": diff name v: %s k: %s\n",
-						 mem_start, sym->name, pair->name);
+					if (UM(next->start) == mem_start) {
+						pair = next;
+						goto next_pair;
+					}
 				}
+
+				if (backwards) {
+					backwards = false;
+					pair = first_pair;
+					goto detour;
+				}
+
+				pr_debug("%#" PRIx64 ": diff name v: %s k: %s\n",
+					 mem_start, sym->name, pair->name);
 			}
 		} else
 			pr_debug("%#" PRIx64 ": %s not on kallsyms\n",

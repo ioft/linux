@@ -535,7 +535,11 @@ static int read_cow_bitmap(int fd, void *buf, int offset, int len)
 {
 	int err;
 
-	err = os_pread_file(fd, buf, len, offset);
+	err = os_seek_file(fd, offset);
+	if (err < 0)
+		return err;
+
+	err = os_read_file(fd, buf, len);
 	if (err < 0)
 		return err;
 
@@ -1373,8 +1377,14 @@ static int update_bitmap(struct io_thread_req *req)
 	if(req->cow_offset == -1)
 		return 0;
 
-	n = os_pwrite_file(req->fds[1], &req->bitmap_words,
-			  sizeof(req->bitmap_words), req->cow_offset);
+	n = os_seek_file(req->fds[1], req->cow_offset);
+	if(n < 0){
+		printk("do_io - bitmap lseek failed : err = %d\n", -n);
+		return 1;
+	}
+
+	n = os_write_file(req->fds[1], &req->bitmap_words,
+			  sizeof(req->bitmap_words));
 	if(n != sizeof(req->bitmap_words)){
 		printk("do_io - bitmap update failed, err = %d fd = %d\n", -n,
 		       req->fds[1]);
@@ -1389,6 +1399,7 @@ static void do_io(struct io_thread_req *req)
 	char *buf;
 	unsigned long len;
 	int n, nsectors, start, end, bit;
+	int err;
 	__u64 off;
 
 	if (req->op == UBD_FLUSH) {
@@ -1417,12 +1428,18 @@ static void do_io(struct io_thread_req *req)
 		len = (end - start) * req->sectorsize;
 		buf = &req->buffer[start * req->sectorsize];
 
+		err = os_seek_file(req->fds[bit], off);
+		if(err < 0){
+			printk("do_io - lseek failed : err = %d\n", -err);
+			req->error = 1;
+			return;
+		}
 		if(req->op == UBD_READ){
 			n = 0;
 			do {
 				buf = &buf[n];
 				len -= n;
-				n = os_pread_file(req->fds[bit], buf, len, off);
+				n = os_read_file(req->fds[bit], buf, len);
 				if (n < 0) {
 					printk("do_io - read failed, err = %d "
 					       "fd = %d\n", -n, req->fds[bit]);
@@ -1432,7 +1449,7 @@ static void do_io(struct io_thread_req *req)
 			} while((n < len) && (n != 0));
 			if (n < len) memset(&buf[n], 0, len - n);
 		} else {
-			n = os_pwrite_file(req->fds[bit], buf, len, off);
+			n = os_write_file(req->fds[bit], buf, len);
 			if(n != len){
 				printk("do_io - write failed err = %d "
 				       "fd = %d\n", -n, req->fds[bit]);

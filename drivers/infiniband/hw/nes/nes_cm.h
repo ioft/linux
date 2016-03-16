@@ -423,7 +423,7 @@ struct nes_cm_core {
 
 	struct timer_list       tcp_timer;
 
-	const struct nes_cm_ops *api;
+	struct nes_cm_ops       *api;
 
 	int (*post_event)(struct nes_cm_event *event);
 	atomic_t                events_posted;

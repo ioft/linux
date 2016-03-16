@@ -116,9 +116,9 @@ void __local_bh_disable_ip(unsigned long ip, unsigned int cnt)
 
 	if (preempt_count() == cnt) {
 #ifdef CONFIG_DEBUG_PREEMPT
-		current->preempt_disable_ip = get_lock_parent_ip();
+		current->preempt_disable_ip = get_parent_ip(CALLER_ADDR1);
 #endif
-		trace_preempt_off(CALLER_ADDR0, get_lock_parent_ip());
+		trace_preempt_off(CALLER_ADDR0, get_parent_ip(CALLER_ADDR1));
 	}
 }
 EXPORT_SYMBOL(__local_bh_disable_ip);

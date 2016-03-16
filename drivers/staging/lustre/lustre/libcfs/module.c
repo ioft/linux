@@ -27,7 +27,7 @@
  * Copyright (c) 2008, 2010, Oracle and/or its affiliates. All rights reserved.
  * Use is subject to license terms.
  *
- * Copyright (c) 2012, 2015 Intel Corporation.
+ * Copyright (c) 2012, Intel Corporation.
  */
 /*
  * This file is part of Lustre, http://www.lustre.org/
@@ -62,7 +62,7 @@
 #include "../../include/linux/lnet/lnet.h"
 #include "tracefile.h"
 
-MODULE_AUTHOR("OpenSFS, Inc. <http://www.lustre.org/>");
+MODULE_AUTHOR("Peter J. Braam <braam@clusterfs.com>");
 MODULE_DESCRIPTION("Portals v3.1");
 MODULE_LICENSE("GPL");
 
@@ -375,7 +375,7 @@ static int __proc_dobitmasks(void *data, int write,
 	} else {
 		rc = cfs_trace_copyin_string(tmpstr, tmpstrlen, buffer, nob);
 		if (rc < 0) {
-			kfree(tmpstr);
+			cfs_trace_free_string_buffer(tmpstr, tmpstrlen);
 			return rc;
 		}
 
@@ -385,7 +385,7 @@ static int __proc_dobitmasks(void *data, int write,
 			*mask |= D_EMERG;
 	}
 
-	kfree(tmpstr);
+	cfs_trace_free_string_buffer(tmpstr, tmpstrlen);
 	return rc;
 }
 

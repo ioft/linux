@@ -34,6 +34,7 @@ struct meson_pmx_group {
 	bool is_gpio;
 	unsigned int reg;
 	unsigned int bit;
+	unsigned int domain;
 };
 
 /**
@@ -143,6 +144,7 @@ struct meson_pinctrl_data {
 	unsigned int num_pins;
 	unsigned int num_groups;
 	unsigned int num_funcs;
+	unsigned int num_domains;
 };
 
 struct meson_pinctrl {
@@ -150,7 +152,7 @@ struct meson_pinctrl {
 	struct pinctrl_dev *pcdev;
 	struct pinctrl_desc desc;
 	struct meson_pinctrl_data *data;
-	struct meson_domain *domain;
+	struct meson_domain *domains;
 };
 
 #define PIN(x, b)	(b + x)
@@ -162,6 +164,7 @@ struct meson_pinctrl {
 		.num_pins = ARRAY_SIZE(grp ## _pins),			\
 		.reg = r,						\
 		.bit = b,						\
+		.domain = 0,						\
 	 }
 
 #define GPIO_GROUP(gpio, b)						\
@@ -170,6 +173,16 @@ struct meson_pinctrl {
 		.pins = (const unsigned int[]){ PIN(gpio, b) },		\
 		.num_pins = 1,						\
 		.is_gpio = true,					\
+	 }
+
+#define GROUP_AO(grp, r, b)						\
+	{								\
+		.name = #grp,						\
+		.pins = grp ## _pins,					\
+		.num_pins = ARRAY_SIZE(grp ## _pins),			\
+		.reg = r,						\
+		.bit = b,						\
+		.domain = 1,						\
 	 }
 
 #define FUNCTION(fn)							\
@@ -195,7 +208,5 @@ struct meson_pinctrl {
 
 #define MESON_PIN(x, b) PINCTRL_PIN(PIN(x, b), #x)
 
-extern struct meson_pinctrl_data meson8_cbus_pinctrl_data;
-extern struct meson_pinctrl_data meson8_aobus_pinctrl_data;
-extern struct meson_pinctrl_data meson8b_cbus_pinctrl_data;
-extern struct meson_pinctrl_data meson8b_aobus_pinctrl_data;
+extern struct meson_pinctrl_data meson8_pinctrl_data;
+extern struct meson_pinctrl_data meson8b_pinctrl_data;

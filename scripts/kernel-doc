@@ -1816,8 +1816,6 @@ sub dump_struct($$) {
 	$members =~ s/__attribute__\s*\(\([a-z,_\*\s\(\)]*\)\)//i;
 	$members =~ s/__aligned\s*\([^;]*\)//gos;
 	$members =~ s/\s*CRYPTO_MINALIGN_ATTR//gos;
-	# replace DECLARE_BITMAP
-	$members =~ s/DECLARE_BITMAP\s*\(([^,)]+), ([^,)]+)\)/unsigned long $1\[BITS_TO_LONGS($2)\]/gos;
 
 	create_parameterlist($members, ';', $file);
 	check_sections($file, $declaration_name, "struct", $sectcheck, $struct_actual, $nested);
@@ -1846,8 +1844,7 @@ sub dump_enum($$) {
     my $file = shift;
 
     $x =~ s@/\*.*?\*/@@gos;	# strip comments.
-    # strip #define macros inside enums
-    $x =~ s@#\s*((define|ifdef)\s+|endif)[^;]*;@@gos;
+    $x =~ s/^#\s*define\s+.*$//; # strip #define macros inside enums
 
     if ($x =~ /enum\s+(\w+)\s*{(.*)}/) {
 	$declaration_name = $1;

@@ -663,7 +663,6 @@ int radeon_gem_va_ioctl(struct drm_device *dev, void *data,
 	bo_va = radeon_vm_bo_find(&fpriv->vm, rbo);
 	if (!bo_va) {
 		args->operation = RADEON_VA_RESULT_ERROR;
-		radeon_bo_unreserve(rbo);
 		drm_gem_object_unreference_unlocked(gobj);
 		return -ENOENT;
 	}

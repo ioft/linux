@@ -268,7 +268,7 @@ int cx23885_input_init(struct cx23885_dev *dev)
 	struct rc_dev *rc;
 	char *rc_map;
 	enum rc_driver_type driver_type;
-	u64 allowed_protos;
+	unsigned long allowed_protos;
 
 	int ret;
 

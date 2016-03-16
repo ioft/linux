@@ -144,11 +144,13 @@ int irq_can_set_affinity(unsigned int irq)
  */
 void irq_set_thread_affinity(struct irq_desc *desc)
 {
-	struct irqaction *action;
+	struct irqaction *action = desc->action;
 
-	for_each_action_of_desc(desc, action)
+	while (action) {
 		if (action->thread)
 			set_bit(IRQTF_AFFINITY, &action->thread_flags);
+		action = action->next;
+	}
 }
 
 #ifdef CONFIG_GENERIC_PENDING_IRQ
@@ -992,7 +994,7 @@ void irq_wake_thread(unsigned int irq, void *dev_id)
 		return;
 
 	raw_spin_lock_irqsave(&desc->lock, flags);
-	for_each_action_of_desc(desc, action) {
+	for (action = desc->action; action; action = action->next) {
 		if (action->dev_id == dev_id) {
 			if (action->thread)
 				__irq_wake_thread(desc, action);
@@ -1740,31 +1742,6 @@ out:
 	irq_put_desc_unlock(desc, flags);
 }
 EXPORT_SYMBOL_GPL(enable_percpu_irq);
-
-/**
- * irq_percpu_is_enabled - Check whether the per cpu irq is enabled
- * @irq:	Linux irq number to check for
- *
- * Must be called from a non migratable context. Returns the enable
- * state of a per cpu interrupt on the current cpu.
- */
-bool irq_percpu_is_enabled(unsigned int irq)
-{
-	unsigned int cpu = smp_processor_id();
-	struct irq_desc *desc;
-	unsigned long flags;
-	bool is_enabled;
-
-	desc = irq_get_desc_lock(irq, &flags, IRQ_GET_DESC_CHECK_PERCPU);
-	if (!desc)
-		return false;
-
-	is_enabled = cpumask_test_cpu(cpu, desc->percpu_enabled);
-	irq_put_desc_unlock(desc, flags);
-
-	return is_enabled;
-}
-EXPORT_SYMBOL_GPL(irq_percpu_is_enabled);
 
 void disable_percpu_irq(unsigned int irq)
 {

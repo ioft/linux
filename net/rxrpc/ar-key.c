@@ -896,9 +896,15 @@ int rxrpc_request_key(struct rxrpc_sock *rx, char __user *optval, int optlen)
 	if (optlen <= 0 || optlen > PAGE_SIZE - 1)
 		return -EINVAL;
 
-	description = memdup_user_nul(optval, optlen);
-	if (IS_ERR(description))
-		return PTR_ERR(description);
+	description = kmalloc(optlen + 1, GFP_KERNEL);
+	if (!description)
+		return -ENOMEM;
+
+	if (copy_from_user(description, optval, optlen)) {
+		kfree(description);
+		return -EFAULT;
+	}
+	description[optlen] = 0;
 
 	key = request_key(&key_type_rxrpc, description, NULL);
 	if (IS_ERR(key)) {
@@ -927,9 +933,15 @@ int rxrpc_server_keyring(struct rxrpc_sock *rx, char __user *optval,
 	if (optlen <= 0 || optlen > PAGE_SIZE - 1)
 		return -EINVAL;
 
-	description = memdup_user_nul(optval, optlen);
-	if (IS_ERR(description))
-		return PTR_ERR(description);
+	description = kmalloc(optlen + 1, GFP_KERNEL);
+	if (!description)
+		return -ENOMEM;
+
+	if (copy_from_user(description, optval, optlen)) {
+		kfree(description);
+		return -EFAULT;
+	}
+	description[optlen] = 0;
 
 	key = request_key(&key_type_keyring, description, NULL);
 	if (IS_ERR(key)) {

@@ -27,7 +27,7 @@
  * Copyright (c) 2007, 2010, Oracle and/or its affiliates. All rights reserved.
  * Use is subject to license terms.
  *
- * Copyright (c) 2011, 2015, Intel Corporation.
+ * Copyright (c) 2011, 2012, Intel Corporation.
  */
 /*
  * This file is part of Lustre, http://www.lustre.org/
@@ -60,10 +60,10 @@
 static
 int get_xattr_type(const char *name)
 {
-	if (!strcmp(name, XATTR_NAME_POSIX_ACL_ACCESS))
+	if (!strcmp(name, POSIX_ACL_XATTR_ACCESS))
 		return XATTR_ACL_ACCESS_T;
 
-	if (!strcmp(name, XATTR_NAME_POSIX_ACL_DEFAULT))
+	if (!strcmp(name, POSIX_ACL_XATTR_DEFAULT))
 		return XATTR_ACL_DEFAULT_T;
 
 	if (!strncmp(name, XATTR_USER_PREFIX,
@@ -193,10 +193,7 @@ int ll_setxattr_common(struct inode *inode, const char *name,
 			 ll_i2suppgid(inode), &req);
 #ifdef CONFIG_FS_POSIX_ACL
 	if (new_value != NULL)
-		/*
-		 * Release the posix ACL space.
-		 */
-		kfree(new_value);
+		lustre_posix_acl_xattr_free(new_value, size);
 	if (acl != NULL)
 		lustre_ext_acl_xattr_free(acl);
 #endif

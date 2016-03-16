@@ -143,7 +143,7 @@ static bool get_mocs_settings(struct drm_device *dev,
 {
 	bool result = false;
 
-	if (IS_SKYLAKE(dev) || IS_KABYLAKE(dev)) {
+	if (IS_SKYLAKE(dev)) {
 		table->size  = ARRAY_SIZE(skylake_mocs_table);
 		table->table = skylake_mocs_table;
 		result = true;
@@ -159,30 +159,11 @@ static bool get_mocs_settings(struct drm_device *dev,
 	return result;
 }
 
-static i915_reg_t mocs_register(enum intel_ring_id ring, int index)
-{
-	switch (ring) {
-	case RCS:
-		return GEN9_GFX_MOCS(index);
-	case VCS:
-		return GEN9_MFX0_MOCS(index);
-	case BCS:
-		return GEN9_BLT_MOCS(index);
-	case VECS:
-		return GEN9_VEBOX_MOCS(index);
-	case VCS2:
-		return GEN9_MFX1_MOCS(index);
-	default:
-		MISSING_CASE(ring);
-		return INVALID_MMIO_REG;
-	}
-}
-
 /**
  * emit_mocs_control_table() - emit the mocs control table
  * @req:	Request to set up the MOCS table for.
  * @table:	The values to program into the control regs.
- * @ring:	The engine for whom to emit the registers.
+ * @reg_base:	The base for the engine that needs to be programmed.
  *
  * This function simply emits a MI_LOAD_REGISTER_IMM command for the
  * given table starting at the given address.
@@ -191,7 +172,7 @@ static i915_reg_t mocs_register(enum intel_ring_id ring, int index)
  */
 static int emit_mocs_control_table(struct drm_i915_gem_request *req,
 				   const struct drm_i915_mocs_table *table,
-				   enum intel_ring_id ring)
+				   u32 reg_base)
 {
 	struct intel_ringbuffer *ringbuf = req->ringbuf;
 	unsigned int index;
@@ -210,7 +191,7 @@ static int emit_mocs_control_table(struct drm_i915_gem_request *req,
 				MI_LOAD_REGISTER_IMM(GEN9_NUM_MOCS_ENTRIES));
 
 	for (index = 0; index < table->size; index++) {
-		intel_logical_ring_emit_reg(ringbuf, mocs_register(ring, index));
+		intel_logical_ring_emit(ringbuf, reg_base + index * 4);
 		intel_logical_ring_emit(ringbuf,
 					table->table[index].control_value);
 	}
@@ -224,7 +205,7 @@ static int emit_mocs_control_table(struct drm_i915_gem_request *req,
 	 * that value to all the used entries.
 	 */
 	for (; index < GEN9_NUM_MOCS_ENTRIES; index++) {
-		intel_logical_ring_emit_reg(ringbuf, mocs_register(ring, index));
+		intel_logical_ring_emit(ringbuf, reg_base + index * 4);
 		intel_logical_ring_emit(ringbuf, table->table[0].control_value);
 	}
 
@@ -272,7 +253,7 @@ static int emit_mocs_l3cc_table(struct drm_i915_gem_request *req,
 		value = (table->table[count].l3cc_value & 0xffff) |
 			((table->table[count + 1].l3cc_value & 0xffff) << 16);
 
-		intel_logical_ring_emit_reg(ringbuf, GEN9_LNCFCMOCS(i));
+		intel_logical_ring_emit(ringbuf, GEN9_LNCFCMOCS0 + i * 4);
 		intel_logical_ring_emit(ringbuf, value);
 	}
 
@@ -289,7 +270,7 @@ static int emit_mocs_l3cc_table(struct drm_i915_gem_request *req,
 	 * they are reserved by the hardware.
 	 */
 	for (; i < GEN9_NUM_MOCS_ENTRIES / 2; i++) {
-		intel_logical_ring_emit_reg(ringbuf, GEN9_LNCFCMOCS(i));
+		intel_logical_ring_emit(ringbuf, GEN9_LNCFCMOCS0 + i * 4);
 		intel_logical_ring_emit(ringbuf, value);
 
 		value = filler;
@@ -323,16 +304,26 @@ int intel_rcs_context_init_mocs(struct drm_i915_gem_request *req)
 	int ret;
 
 	if (get_mocs_settings(req->ring->dev, &t)) {
-		struct drm_i915_private *dev_priv = req->i915;
-		struct intel_engine_cs *ring;
-		enum intel_ring_id ring_id;
-
 		/* Program the control registers */
-		for_each_ring(ring, dev_priv, ring_id) {
-			ret = emit_mocs_control_table(req, &t, ring_id);
-			if (ret)
-				return ret;
-		}
+		ret = emit_mocs_control_table(req, &t, GEN9_GFX_MOCS_0);
+		if (ret)
+			return ret;
+
+		ret = emit_mocs_control_table(req, &t, GEN9_MFX0_MOCS_0);
+		if (ret)
+			return ret;
+
+		ret = emit_mocs_control_table(req, &t, GEN9_MFX1_MOCS_0);
+		if (ret)
+			return ret;
+
+		ret = emit_mocs_control_table(req, &t, GEN9_VEBOX_MOCS_0);
+		if (ret)
+			return ret;
+
+		ret = emit_mocs_control_table(req, &t, GEN9_BLT_MOCS_0);
+		if (ret)
+			return ret;
 
 		/* Now program the l3cc registers */
 		ret = emit_mocs_l3cc_table(req, &t);

@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <getopt.h>
+#include <cpufreq.h>
 
 #include "helpers/helpers.h"
 #include "helpers/sysfs.h"
@@ -23,6 +24,8 @@ static void cpuidle_cpu_output(unsigned int cpu, int verbose)
 {
 	unsigned int idlestates, idlestate;
 	char *tmp;
+
+	printf(_ ("Analyzing CPU %d:\n"), cpu);
 
 	idlestates = sysfs_get_idlestate_count(cpu);
 	if (idlestates == 0) {
@@ -68,6 +71,7 @@ static void cpuidle_cpu_output(unsigned int cpu, int verbose)
 		printf(_("Duration: %llu\n"),
 		       sysfs_get_idlestate_time(cpu, idlestate));
 	}
+	printf("\n");
 }
 
 static void cpuidle_general_output(void)
@@ -185,16 +189,9 @@ int cmd_idle_info(int argc, char **argv)
 	for (cpu = bitmask_first(cpus_chosen);
 	     cpu <= bitmask_last(cpus_chosen); cpu++) {
 
-		if (!bitmask_isbitset(cpus_chosen, cpu))
+		if (!bitmask_isbitset(cpus_chosen, cpu) ||
+		    cpufreq_cpu_exists(cpu))
 			continue;
-
-		printf(_("analyzing CPU %d:\n"), cpu);
-
-		if (sysfs_is_cpu_online(cpu) != 1) {
-			printf(_(" *is offline\n"));
-			printf("\n");
-			continue;
-		}
 
 		switch (output_param) {
 
@@ -206,7 +203,6 @@ int cmd_idle_info(int argc, char **argv)
 			cpuidle_cpu_output(cpu, verbose);
 			break;
 		}
-		printf("\n");
 	}
 	return EXIT_SUCCESS;
 }

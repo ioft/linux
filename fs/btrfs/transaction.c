@@ -75,23 +75,6 @@ void btrfs_put_transaction(struct btrfs_transaction *transaction)
 			list_del_init(&em->list);
 			free_extent_map(em);
 		}
-		/*
-		 * If any block groups are found in ->deleted_bgs then it's
-		 * because the transaction was aborted and a commit did not
-		 * happen (things failed before writing the new superblock
-		 * and calling btrfs_finish_extent_commit()), so we can not
-		 * discard the physical locations of the block groups.
-		 */
-		while (!list_empty(&transaction->deleted_bgs)) {
-			struct btrfs_block_group_cache *cache;
-
-			cache = list_first_entry(&transaction->deleted_bgs,
-						 struct btrfs_block_group_cache,
-						 bg_list);
-			list_del_init(&cache->bg_list);
-			btrfs_put_block_group_trimming(cache);
-			btrfs_put_block_group(cache);
-		}
 		kmem_cache_free(btrfs_transaction_cachep, transaction);
 	}
 }
@@ -651,20 +634,17 @@ struct btrfs_trans_handle *btrfs_start_transaction_lflush(
 
 struct btrfs_trans_handle *btrfs_join_transaction(struct btrfs_root *root)
 {
-	return start_transaction(root, 0, TRANS_JOIN,
-				 BTRFS_RESERVE_NO_FLUSH);
+	return start_transaction(root, 0, TRANS_JOIN, 0);
 }
 
 struct btrfs_trans_handle *btrfs_join_transaction_nolock(struct btrfs_root *root)
 {
-	return start_transaction(root, 0, TRANS_JOIN_NOLOCK,
-				 BTRFS_RESERVE_NO_FLUSH);
+	return start_transaction(root, 0, TRANS_JOIN_NOLOCK, 0);
 }
 
 struct btrfs_trans_handle *btrfs_start_ioctl_transaction(struct btrfs_root *root)
 {
-	return start_transaction(root, 0, TRANS_USERSPACE,
-				 BTRFS_RESERVE_NO_FLUSH);
+	return start_transaction(root, 0, TRANS_USERSPACE, 0);
 }
 
 /*
@@ -682,8 +662,7 @@ struct btrfs_trans_handle *btrfs_start_ioctl_transaction(struct btrfs_root *root
  */
 struct btrfs_trans_handle *btrfs_attach_transaction(struct btrfs_root *root)
 {
-	return start_transaction(root, 0, TRANS_ATTACH,
-				 BTRFS_RESERVE_NO_FLUSH);
+	return start_transaction(root, 0, TRANS_ATTACH, 0);
 }
 
 /*
@@ -698,8 +677,7 @@ btrfs_attach_transaction_barrier(struct btrfs_root *root)
 {
 	struct btrfs_trans_handle *trans;
 
-	trans = start_transaction(root, 0, TRANS_ATTACH,
-				  BTRFS_RESERVE_NO_FLUSH);
+	trans = start_transaction(root, 0, TRANS_ATTACH, 0);
 	if (IS_ERR(trans) && PTR_ERR(trans) == -ENOENT)
 		btrfs_wait_for_commit(root, 0);
 
@@ -1341,11 +1319,17 @@ static noinline int create_pending_snapshot(struct btrfs_trans_handle *trans,
 	u64 root_flags;
 	uuid_le new_uuid;
 
-	ASSERT(pending->path);
-	path = pending->path;
+	path = btrfs_alloc_path();
+	if (!path) {
+		pending->error = -ENOMEM;
+		return 0;
+	}
 
-	ASSERT(pending->root_item);
-	new_root_item = pending->root_item;
+	new_root_item = kmalloc(sizeof(*new_root_item), GFP_NOFS);
+	if (!new_root_item) {
+		pending->error = -ENOMEM;
+		goto root_item_alloc_fail;
+	}
 
 	pending->error = btrfs_find_free_objectid(tree_root, &objectid);
 	if (pending->error)
@@ -1578,10 +1562,8 @@ clear_skip_qgroup:
 	btrfs_clear_skip_qgroup(trans);
 no_free_objectid:
 	kfree(new_root_item);
-	pending->root_item = NULL;
+root_item_alloc_fail:
 	btrfs_free_path(path);
-	pending->path = NULL;
-
 	return ret;
 }
 

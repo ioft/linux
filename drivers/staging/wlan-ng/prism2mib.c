@@ -660,6 +660,7 @@ static int prism2mib_fragmentationthreshold(struct mibrec *mib,
 					    struct p80211msg_dot11req_mibset *msg,
 					    void *data)
 {
+	int result;
 	u32 *uint32 = (u32 *) data;
 
 	if (!isget)
@@ -671,7 +672,9 @@ static int prism2mib_fragmentationthreshold(struct mibrec *mib,
 			return 0;
 		}
 
-	return prism2mib_uint32(mib, isget, wlandev, hw, msg, data);
+	result = prism2mib_uint32(mib, isget, wlandev, hw, msg, data);
+
+	return result;
 }
 
 /*----------------------------------------------------------------

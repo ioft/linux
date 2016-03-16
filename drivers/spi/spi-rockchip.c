@@ -13,14 +13,20 @@
  *
  */
 
-#include <linux/clk.h>
-#include <linux/dmaengine.h>
+#include <linux/init.h>
 #include <linux/module.h>
-#include <linux/of.h>
+#include <linux/clk.h>
+#include <linux/err.h>
+#include <linux/delay.h>
+#include <linux/interrupt.h>
 #include <linux/platform_device.h>
+#include <linux/slab.h>
 #include <linux/spi/spi.h>
-#include <linux/pm_runtime.h>
 #include <linux/scatterlist.h>
+#include <linux/of.h>
+#include <linux/pm_runtime.h>
+#include <linux/io.h>
+#include <linux/dmaengine.h>
 
 #define DRIVER_NAME "rockchip-spi"
 
@@ -173,7 +179,7 @@ struct rockchip_spi {
 	u8 tmode;
 	u8 bpw;
 	u8 n_bytes;
-	u32 rsd_nsecs;
+	u8 rsd_nsecs;
 	unsigned len;
 	u32 speed;
 
@@ -185,6 +191,8 @@ struct rockchip_spi {
 	u32 state;
 	/* protect state */
 	spinlock_t lock;
+
+	struct completion xfer_completion;
 
 	u32 use_dma;
 	struct sg_table tx_sg;
@@ -257,10 +265,7 @@ static inline u32 rx_max(struct rockchip_spi *rs)
 static void rockchip_spi_set_cs(struct spi_device *spi, bool enable)
 {
 	u32 ser;
-	struct spi_master *master = spi->master;
-	struct rockchip_spi *rs = spi_master_get_devdata(master);
-
-	pm_runtime_get_sync(rs->dev);
+	struct rockchip_spi *rs = spi_master_get_devdata(spi->master);
 
 	ser = readl_relaxed(rs->regs + ROCKCHIP_SPI_SER) & SER_MASK;
 
@@ -285,8 +290,6 @@ static void rockchip_spi_set_cs(struct spi_device *spi, bool enable)
 		ser &= ~(1 << spi->chip_select);
 
 	writel_relaxed(ser, rs->regs + ROCKCHIP_SPI_SER);
-
-	pm_runtime_put_sync(rs->dev);
 }
 
 static int rockchip_spi_prepare_message(struct spi_master *master,
@@ -316,12 +319,12 @@ static void rockchip_spi_handle_err(struct spi_master *master,
 	 */
 	if (rs->use_dma) {
 		if (rs->state & RXBUSY) {
-			dmaengine_terminate_async(rs->dma_rx.ch);
+			dmaengine_terminate_all(rs->dma_rx.ch);
 			flush_fifo(rs);
 		}
 
 		if (rs->state & TXBUSY)
-			dmaengine_terminate_async(rs->dma_tx.ch);
+			dmaengine_terminate_all(rs->dma_tx.ch);
 	}
 
 	spin_unlock_irqrestore(&rs->lock, flags);
@@ -430,7 +433,7 @@ static void rockchip_spi_dma_txcb(void *data)
 	spin_unlock_irqrestore(&rs->lock, flags);
 }
 
-static int rockchip_spi_prepare_dma(struct rockchip_spi *rs)
+static void rockchip_spi_prepare_dma(struct rockchip_spi *rs)
 {
 	unsigned long flags;
 	struct dma_slave_config rxconf, txconf;
@@ -453,8 +456,6 @@ static int rockchip_spi_prepare_dma(struct rockchip_spi *rs)
 				rs->dma_rx.ch,
 				rs->rx_sg.sgl, rs->rx_sg.nents,
 				rs->dma_rx.direction, DMA_PREP_INTERRUPT);
-		if (!rxdesc)
-			return -EINVAL;
 
 		rxdesc->callback = rockchip_spi_dma_rxcb;
 		rxdesc->callback_param = rs;
@@ -472,11 +473,6 @@ static int rockchip_spi_prepare_dma(struct rockchip_spi *rs)
 				rs->dma_tx.ch,
 				rs->tx_sg.sgl, rs->tx_sg.nents,
 				rs->dma_tx.direction, DMA_PREP_INTERRUPT);
-		if (!txdesc) {
-			if (rxdesc)
-				dmaengine_terminate_sync(rs->dma_rx.ch);
-			return -EINVAL;
-		}
 
 		txdesc->callback = rockchip_spi_dma_txcb;
 		txdesc->callback_param = rs;
@@ -498,8 +494,6 @@ static int rockchip_spi_prepare_dma(struct rockchip_spi *rs)
 		dmaengine_submit(txdesc);
 		dma_async_issue_pending(rs->dma_tx.ch);
 	}
-
-	return 0;
 }
 
 static void rockchip_spi_config(struct rockchip_spi *rs)
@@ -509,8 +503,7 @@ static void rockchip_spi_config(struct rockchip_spi *rs)
 	int rsd = 0;
 
 	u32 cr0 = (CR0_BHT_8BIT << CR0_BHT_OFFSET)
-		| (CR0_SSD_ONE << CR0_SSD_OFFSET)
-		| (CR0_EM_BIG << CR0_EM_OFFSET);
+		| (CR0_SSD_ONE << CR0_SSD_OFFSET);
 
 	cr0 |= (rs->n_bytes << CR0_DFS_OFFSET);
 	cr0 |= ((rs->mode & 0x3) << CR0_SCPH_OFFSET);
@@ -613,12 +606,12 @@ static int rockchip_spi_transfer_one(
 	if (rs->use_dma) {
 		if (rs->tmode == CR0_XFM_RO) {
 			/* rx: dma must be prepared first */
-			ret = rockchip_spi_prepare_dma(rs);
+			rockchip_spi_prepare_dma(rs);
 			spi_enable_chip(rs, 1);
 		} else {
 			/* tx or tr: spi must be enabled first */
 			spi_enable_chip(rs, 1);
-			ret = rockchip_spi_prepare_dma(rs);
+			rockchip_spi_prepare_dma(rs);
 		}
 	} else {
 		spi_enable_chip(rs, 1);
@@ -724,14 +717,8 @@ static int rockchip_spi_probe(struct platform_device *pdev)
 	master->handle_err = rockchip_spi_handle_err;
 
 	rs->dma_tx.ch = dma_request_slave_channel(rs->dev, "tx");
-	if (IS_ERR_OR_NULL(rs->dma_tx.ch)) {
-		/* Check tx to see if we need defer probing driver */
-		if (PTR_ERR(rs->dma_tx.ch) == -EPROBE_DEFER) {
-			ret = -EPROBE_DEFER;
-			goto err_get_fifo_len;
-		}
+	if (!rs->dma_tx.ch)
 		dev_warn(rs->dev, "Failed to request TX DMA channel\n");
-	}
 
 	rs->dma_rx.ch = dma_request_slave_channel(rs->dev, "rx");
 	if (!rs->dma_rx.ch) {
@@ -762,7 +749,6 @@ static int rockchip_spi_probe(struct platform_device *pdev)
 	return 0;
 
 err_register_master:
-	pm_runtime_disable(&pdev->dev);
 	if (rs->dma_tx.ch)
 		dma_release_channel(rs->dma_tx.ch);
 	if (rs->dma_rx.ch)
@@ -791,8 +777,6 @@ static int rockchip_spi_remove(struct platform_device *pdev)
 		dma_release_channel(rs->dma_tx.ch);
 	if (rs->dma_rx.ch)
 		dma_release_channel(rs->dma_rx.ch);
-
-	spi_master_put(master);
 
 	return 0;
 }
@@ -884,7 +868,6 @@ static const struct of_device_id rockchip_spi_dt_match[] = {
 	{ .compatible = "rockchip,rk3066-spi", },
 	{ .compatible = "rockchip,rk3188-spi", },
 	{ .compatible = "rockchip,rk3288-spi", },
-	{ .compatible = "rockchip,rk3399-spi", },
 	{ },
 };
 MODULE_DEVICE_TABLE(of, rockchip_spi_dt_match);

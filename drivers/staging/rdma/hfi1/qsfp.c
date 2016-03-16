@@ -475,7 +475,7 @@ int qsfp_dump(struct hfi1_pportdata *ppd, char *buf, int len)
 	u8 *cache = &ppd->qsfp_info.cache[0];
 	u8 bin_buff[QSFP_DUMP_CHUNK];
 	char lenstr[6];
-	int sofar;
+	int sofar, ret;
 	int bidx = 0;
 	u8 *atten = &cache[QSFP_ATTEN_OFFS];
 	u8 *vendor_oui = &cache[QSFP_VOUI_OFFS];
@@ -536,5 +536,6 @@ int qsfp_dump(struct hfi1_pportdata *ppd, char *buf, int len)
 			bidx += QSFP_DUMP_CHUNK;
 		}
 	}
-	return sofar;
+	ret = sofar;
+	return ret;
 }

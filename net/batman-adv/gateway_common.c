@@ -31,22 +31,26 @@
 #include "packet.h"
 
 /**
- * batadv_parse_throughput - parse supplied string buffer to extract throughput
- *  information
+ * batadv_parse_gw_bandwidth - parse supplied string buffer to extract download
+ *  and upload bandwidth information
  * @net_dev: the soft interface net device
  * @buff: string buffer to parse
- * @description: text shown when throughput string cannot be parsed
- * @throughput: pointer holding the returned throughput information
+ * @down: pointer holding the returned download bandwidth information
+ * @up: pointer holding the returned upload bandwidth information
  *
  * Returns false on parse error and true otherwise.
  */
-static bool batadv_parse_throughput(struct net_device *net_dev, char *buff,
-				    const char *description, u32 *throughput)
+static bool batadv_parse_gw_bandwidth(struct net_device *net_dev, char *buff,
+				      u32 *down, u32 *up)
 {
 	enum batadv_bandwidth_units bw_unit_type = BATADV_BW_UNIT_KBIT;
-	u64 lthroughput;
-	char *tmp_ptr;
+	char *slash_ptr, *tmp_ptr;
+	u64 ldown, lup;
 	int ret;
+
+	slash_ptr = strchr(buff, '/');
+	if (slash_ptr)
+		*slash_ptr = 0;
 
 	if (strlen(buff) > 4) {
 		tmp_ptr = buff + strlen(buff) - 4;
@@ -59,75 +63,90 @@ static bool batadv_parse_throughput(struct net_device *net_dev, char *buff,
 			*tmp_ptr = '\0';
 	}
 
-	ret = kstrtou64(buff, 10, &lthroughput);
+	ret = kstrtou64(buff, 10, &ldown);
 	if (ret) {
 		batadv_err(net_dev,
-			   "Invalid throughput speed for %s: %s\n",
-			   description, buff);
+			   "Download speed of gateway mode invalid: %s\n",
+			   buff);
 		return false;
 	}
 
 	switch (bw_unit_type) {
 	case BATADV_BW_UNIT_MBIT:
 		/* prevent overflow */
-		if (U64_MAX / 10 < lthroughput) {
+		if (U64_MAX / 10 < ldown) {
 			batadv_err(net_dev,
-				   "Throughput speed for %s too large: %s\n",
-				   description, buff);
+				   "Download speed of gateway mode too large: %s\n",
+				   buff);
 			return false;
 		}
 
-		lthroughput *= 10;
+		ldown *= 10;
 		break;
 	case BATADV_BW_UNIT_KBIT:
 	default:
-		lthroughput = div_u64(lthroughput, 100);
+		ldown = div_u64(ldown, 100);
 		break;
 	}
 
-	if (lthroughput > U32_MAX) {
+	if (U32_MAX < ldown) {
 		batadv_err(net_dev,
-			   "Throughput speed for %s too large: %s\n",
-			   description, buff);
+			   "Download speed of gateway mode too large: %s\n",
+			   buff);
 		return false;
 	}
 
-	*throughput = lthroughput;
-
-	return true;
-}
-
-/**
- * batadv_parse_gw_bandwidth - parse supplied string buffer to extract download
- *  and upload bandwidth information
- * @net_dev: the soft interface net device
- * @buff: string buffer to parse
- * @down: pointer holding the returned download bandwidth information
- * @up: pointer holding the returned upload bandwidth information
- *
- * Return: false on parse error and true otherwise.
- */
-static bool batadv_parse_gw_bandwidth(struct net_device *net_dev, char *buff,
-				      u32 *down, u32 *up)
-{
-	char *slash_ptr;
-	bool ret;
-
-	slash_ptr = strchr(buff, '/');
-	if (slash_ptr)
-		*slash_ptr = 0;
-
-	ret = batadv_parse_throughput(net_dev, buff, "download gateway speed",
-				      down);
-	if (!ret)
-		return false;
+	*down = ldown;
 
 	/* we also got some upload info */
 	if (slash_ptr) {
-		ret = batadv_parse_throughput(net_dev, slash_ptr + 1,
-					      "upload gateway speed", up);
-		if (!ret)
+		bw_unit_type = BATADV_BW_UNIT_KBIT;
+
+		if (strlen(slash_ptr + 1) > 4) {
+			tmp_ptr = slash_ptr + 1 - 4 + strlen(slash_ptr + 1);
+
+			if (strncasecmp(tmp_ptr, "mbit", 4) == 0)
+				bw_unit_type = BATADV_BW_UNIT_MBIT;
+
+			if ((strncasecmp(tmp_ptr, "kbit", 4) == 0) ||
+			    (bw_unit_type == BATADV_BW_UNIT_MBIT))
+				*tmp_ptr = '\0';
+		}
+
+		ret = kstrtou64(slash_ptr + 1, 10, &lup);
+		if (ret) {
+			batadv_err(net_dev,
+				   "Upload speed of gateway mode invalid: %s\n",
+				   slash_ptr + 1);
 			return false;
+		}
+
+		switch (bw_unit_type) {
+		case BATADV_BW_UNIT_MBIT:
+			/* prevent overflow */
+			if (U64_MAX / 10 < lup) {
+				batadv_err(net_dev,
+					   "Upload speed of gateway mode too large: %s\n",
+					   slash_ptr + 1);
+				return false;
+			}
+
+			lup *= 10;
+			break;
+		case BATADV_BW_UNIT_KBIT:
+		default:
+			lup = div_u64(lup, 100);
+			break;
+		}
+
+		if (U32_MAX < lup) {
+			batadv_err(net_dev,
+				   "Upload speed of gateway mode too large: %s\n",
+				   slash_ptr + 1);
+			return false;
+		}
+
+		*up = lup;
 	}
 
 	return true;

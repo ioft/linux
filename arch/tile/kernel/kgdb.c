@@ -164,7 +164,7 @@ static unsigned long writable_address(unsigned long addr)
 	unsigned long ret = 0;
 
 	if (core_kernel_text(addr))
-		ret = ktext_writable_addr(addr);
+		ret = addr - MEM_SV_START + PAGE_OFFSET;
 	else if (is_module_text_address(addr))
 		ret = addr;
 	else

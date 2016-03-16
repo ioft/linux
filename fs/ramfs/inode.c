@@ -79,7 +79,6 @@ struct inode *ramfs_get_inode(struct super_block *sb,
 			break;
 		case S_IFLNK:
 			inode->i_op = &page_symlink_inode_operations;
-			inode_nohighmem(inode);
 			break;
 		}
 	}

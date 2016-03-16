@@ -364,7 +364,7 @@ static void sparc_start_secondary(void *arg)
 	local_irq_enable();
 
 	wmb();
-	cpu_startup_entry(CPUHP_AP_ONLINE_IDLE);
+	cpu_startup_entry(CPUHP_ONLINE);
 
 	/* We should never reach here! */
 	BUG();

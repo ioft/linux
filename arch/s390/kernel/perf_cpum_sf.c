@@ -1022,13 +1022,10 @@ static int perf_push_sample(struct perf_event *event, struct sf_raw_sample *sfr)
 	/*
 	 * A non-zero guest program parameter indicates a guest
 	 * sample.
-	 * Note that some early samples or samples from guests without
-	 * lpp usage would be misaccounted to the host. We use the asn
-	 * value as a heuristic to detect most of these guest samples.
-	 * If the value differs from the host hpp value, we assume
-	 * it to be a KVM guest.
+	 * Note that some early samples might be misaccounted to
+	 * the host.
 	 */
-	if (sfr->basic.gpp || sfr->basic.prim_asn != (u16) sfr->basic.hpp)
+	if (sfr->basic.gpp)
 		sde_regs->in_guest = 1;
 
 	overflow = 0;

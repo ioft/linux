@@ -21,6 +21,7 @@ static struct snd_tscm_spec model_specs[] = {
 		.pcm_playback_analog_channels = 8,
 		.midi_capture_ports = 4,
 		.midi_playback_ports = 4,
+		.is_controller = true,
 	},
 	{
 		.name = "FW-1082",
@@ -30,16 +31,9 @@ static struct snd_tscm_spec model_specs[] = {
 		.pcm_playback_analog_channels = 2,
 		.midi_capture_ports = 2,
 		.midi_playback_ports = 2,
+		.is_controller = true,
 	},
-	{
-		.name = "FW-1804",
-		.has_adat = true,
-		.has_spdif = true,
-		.pcm_capture_analog_channels = 8,
-		.pcm_playback_analog_channels = 2,
-		.midi_capture_ports = 2,
-		.midi_playback_ports = 4,
-	},
+	/* FW-1804 may be supported. */
 };
 
 static int identify_model(struct snd_tscm *tscm)

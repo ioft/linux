@@ -12,7 +12,7 @@
  * anyone care?
  *
  * For virtio_pci on SMP, we don't need to order with respect to MMIO
- * accesses through relaxed memory I/O windows, so virt_mb() et al are
+ * accesses through relaxed memory I/O windows, so smp_mb() et al are
  * sufficient.
  *
  * For using virtio to talk to real devices (eg. other heterogeneous
@@ -23,16 +23,18 @@
 
 static inline void virtio_mb(bool weak_barriers)
 {
+#ifdef CONFIG_SMP
 	if (weak_barriers)
-		virt_mb();
+		smp_mb();
 	else
+#endif
 		mb();
 }
 
 static inline void virtio_rmb(bool weak_barriers)
 {
 	if (weak_barriers)
-		virt_rmb();
+		dma_rmb();
 	else
 		rmb();
 }
@@ -40,20 +42,9 @@ static inline void virtio_rmb(bool weak_barriers)
 static inline void virtio_wmb(bool weak_barriers)
 {
 	if (weak_barriers)
-		virt_wmb();
+		dma_wmb();
 	else
 		wmb();
-}
-
-static inline void virtio_store_mb(bool weak_barriers,
-				   __virtio16 *p, __virtio16 v)
-{
-	if (weak_barriers) {
-		virt_store_mb(*p, v);
-	} else {
-		WRITE_ONCE(*p, v);
-		mb();
-	}
 }
 
 struct virtio_device;

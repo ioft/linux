@@ -909,7 +909,6 @@ static int ip6_dst_lookup_tail(struct net *net, const struct sock *sk,
 	struct rt6_info *rt;
 #endif
 	int err;
-	int flags = 0;
 
 	/* The correct way to handle this would be to do
 	 * ip6_route_get_saddr, and then ip6_route_output; however,
@@ -941,13 +940,10 @@ static int ip6_dst_lookup_tail(struct net *net, const struct sock *sk,
 			dst_release(*dst);
 			*dst = NULL;
 		}
-
-		if (fl6->flowi6_oif)
-			flags |= RT6_LOOKUP_F_IFACE;
 	}
 
 	if (!*dst)
-		*dst = ip6_route_output_flags(net, sk, fl6, flags);
+		*dst = ip6_route_output(net, sk, fl6);
 
 	err = (*dst)->error;
 	if (err)
@@ -1326,7 +1322,7 @@ emsgsize:
 	    headersize == sizeof(struct ipv6hdr) &&
 	    length < mtu - headersize &&
 	    !(flags & MSG_MORE) &&
-	    rt->dst.dev->features & (NETIF_F_IPV6_CSUM | NETIF_F_HW_CSUM))
+	    rt->dst.dev->features & NETIF_F_V6_CSUM)
 		csummode = CHECKSUM_PARTIAL;
 
 	if (sk->sk_type == SOCK_DGRAM || sk->sk_type == SOCK_RAW) {
@@ -1357,7 +1353,7 @@ emsgsize:
 	     (skb && skb_is_gso(skb))) &&
 	    (sk->sk_protocol == IPPROTO_UDP) &&
 	    (rt->dst.dev->features & NETIF_F_UFO) &&
-	    (sk->sk_type == SOCK_DGRAM) && !udp_get_no_check6_tx(sk)) {
+	    (sk->sk_type == SOCK_DGRAM)) {
 		err = ip6_ufo_append_data(sk, queue, getfrag, from, length,
 					  hh_len, fragheaderlen,
 					  transhdrlen, mtu, flags, fl6);

@@ -11,7 +11,6 @@
  * GNU General Public License for more details.
  */
 
-#include <linux/clk.h>
 #include <linux/version.h>
 #include <linux/module.h>
 #include <linux/init.h>
@@ -123,9 +122,6 @@ struct brcmnand_controller {
 	/* Some SoCs provide custom interrupt status register(s) */
 	struct brcmnand_soc	*soc;
 
-	/* Some SoCs have a gateable clock for the controller */
-	struct clk		*clk;
-
 	int			cmd_pending;
 	bool			dma_pending;
 	struct completion	done;
@@ -138,7 +134,7 @@ struct brcmnand_controller {
 	dma_addr_t		dma_pa;
 
 	/* in-memory cache of the FLASH_CACHE, used only for some commands */
-	u8			flash_cache[FC_BYTES];
+	u32			flash_cache[FC_WORDS];
 
 	/* Controller revision details */
 	const u16		*reg_offsets;
@@ -180,8 +176,10 @@ struct brcmnand_cfg {
 
 struct brcmnand_host {
 	struct list_head	node;
+	struct device_node	*of_node;
 
 	struct nand_chip	chip;
+	struct mtd_info		mtd;
 	struct platform_device	*pdev;
 	int			cs;
 
@@ -876,8 +874,8 @@ static struct nand_ecclayout *brcmstb_choose_ecc_layout(
 
 static void brcmnand_wp(struct mtd_info *mtd, int wp)
 {
-	struct nand_chip *chip = mtd_to_nand(mtd);
-	struct brcmnand_host *host = nand_get_controller_data(chip);
+	struct nand_chip *chip = mtd->priv;
+	struct brcmnand_host *host = chip->priv;
 	struct brcmnand_controller *ctrl = host->ctrl;
 
 	if ((ctrl->features & BRCMNAND_HAS_WP) && wp_on == 1) {
@@ -1042,8 +1040,8 @@ static void brcmnand_cmd_ctrl(struct mtd_info *mtd, int dat,
 
 static int brcmnand_waitfunc(struct mtd_info *mtd, struct nand_chip *this)
 {
-	struct nand_chip *chip = mtd_to_nand(mtd);
-	struct brcmnand_host *host = nand_get_controller_data(chip);
+	struct nand_chip *chip = mtd->priv;
+	struct brcmnand_host *host = chip->priv;
 	struct brcmnand_controller *ctrl = host->ctrl;
 	unsigned long timeo = msecs_to_jiffies(100);
 
@@ -1077,7 +1075,7 @@ static int brcmnand_low_level_op(struct brcmnand_host *host,
 				 enum brcmnand_llop_type type, u32 data,
 				 bool last_op)
 {
-	struct mtd_info *mtd = nand_to_mtd(&host->chip);
+	struct mtd_info *mtd = &host->mtd;
 	struct nand_chip *chip = &host->chip;
 	struct brcmnand_controller *ctrl = host->ctrl;
 	u32 tmp;
@@ -1116,8 +1114,8 @@ static int brcmnand_low_level_op(struct brcmnand_host *host,
 static void brcmnand_cmdfunc(struct mtd_info *mtd, unsigned command,
 			     int column, int page_addr)
 {
-	struct nand_chip *chip = mtd_to_nand(mtd);
-	struct brcmnand_host *host = nand_get_controller_data(chip);
+	struct nand_chip *chip = mtd->priv;
+	struct brcmnand_host *host = chip->priv;
 	struct brcmnand_controller *ctrl = host->ctrl;
 	u64 addr = (u64)page_addr << chip->page_shift;
 	int native_cmd = 0;
@@ -1190,8 +1188,6 @@ static void brcmnand_cmdfunc(struct mtd_info *mtd, unsigned command,
 
 	if (native_cmd == CMD_PARAMETER_READ ||
 			native_cmd == CMD_PARAMETER_CHANGE_COL) {
-		/* Copy flash cache word-wise */
-		u32 *flash_cache = (u32 *)ctrl->flash_cache;
 		int i;
 
 		brcmnand_soc_data_bus_prepare(ctrl->soc);
@@ -1201,11 +1197,7 @@ static void brcmnand_cmdfunc(struct mtd_info *mtd, unsigned command,
 		 * SECTOR_SIZE_1K may invalidate it
 		 */
 		for (i = 0; i < FC_WORDS; i++)
-			/*
-			 * Flash cache is big endian for parameter pages, at
-			 * least on STB SoCs
-			 */
-			flash_cache[i] = be32_to_cpu(brcmnand_read_fc(ctrl, i));
+			ctrl->flash_cache[i] = brcmnand_read_fc(ctrl, i);
 
 		brcmnand_soc_data_bus_unprepare(ctrl->soc);
 
@@ -1222,8 +1214,8 @@ static void brcmnand_cmdfunc(struct mtd_info *mtd, unsigned command,
 
 static uint8_t brcmnand_read_byte(struct mtd_info *mtd)
 {
-	struct nand_chip *chip = mtd_to_nand(mtd);
-	struct brcmnand_host *host = nand_get_controller_data(chip);
+	struct nand_chip *chip = mtd->priv;
+	struct brcmnand_host *host = chip->priv;
 	struct brcmnand_controller *ctrl = host->ctrl;
 	uint8_t ret = 0;
 	int addr, offs;
@@ -1258,7 +1250,8 @@ static uint8_t brcmnand_read_byte(struct mtd_info *mtd)
 		if (host->last_byte > 0 && offs == 0)
 			chip->cmdfunc(mtd, NAND_CMD_RNDOUT, addr, -1);
 
-		ret = ctrl->flash_cache[offs];
+		ret = ctrl->flash_cache[offs >> 2] >>
+					(24 - ((offs & 0x03) << 3));
 		break;
 	case NAND_CMD_GET_FEATURES:
 		if (host->last_byte >= ONFI_SUBFEATURE_PARAM_LEN) {
@@ -1289,8 +1282,8 @@ static void brcmnand_write_buf(struct mtd_info *mtd, const uint8_t *buf,
 				   int len)
 {
 	int i;
-	struct nand_chip *chip = mtd_to_nand(mtd);
-	struct brcmnand_host *host = nand_get_controller_data(chip);
+	struct nand_chip *chip = mtd->priv;
+	struct brcmnand_host *host = chip->priv;
 
 	switch (host->last_cmd) {
 	case NAND_CMD_SET_FEATURES:
@@ -1400,15 +1393,13 @@ static int brcmnand_read_by_pio(struct mtd_info *mtd, struct nand_chip *chip,
 				u64 addr, unsigned int trans, u32 *buf,
 				u8 *oob, u64 *err_addr)
 {
-	struct brcmnand_host *host = nand_get_controller_data(chip);
+	struct brcmnand_host *host = chip->priv;
 	struct brcmnand_controller *ctrl = host->ctrl;
 	int i, j, ret = 0;
 
 	/* Clear error addresses */
 	brcmnand_write_reg(ctrl, BRCMNAND_UNCORR_ADDR, 0);
 	brcmnand_write_reg(ctrl, BRCMNAND_CORR_ADDR, 0);
-	brcmnand_write_reg(ctrl, BRCMNAND_UNCORR_EXT_ADDR, 0);
-	brcmnand_write_reg(ctrl, BRCMNAND_CORR_EXT_ADDR, 0);
 
 	brcmnand_write_reg(ctrl, BRCMNAND_CMD_EXT_ADDRESS,
 			(host->cs << 16) | ((addr >> 32) & 0xffff));
@@ -1463,7 +1454,7 @@ static int brcmnand_read_by_pio(struct mtd_info *mtd, struct nand_chip *chip,
 static int brcmnand_read(struct mtd_info *mtd, struct nand_chip *chip,
 			 u64 addr, unsigned int trans, u32 *buf, u8 *oob)
 {
-	struct brcmnand_host *host = nand_get_controller_data(chip);
+	struct brcmnand_host *host = chip->priv;
 	struct brcmnand_controller *ctrl = host->ctrl;
 	u64 err_addr = 0;
 	int err;
@@ -1513,7 +1504,7 @@ static int brcmnand_read(struct mtd_info *mtd, struct nand_chip *chip,
 static int brcmnand_read_page(struct mtd_info *mtd, struct nand_chip *chip,
 			      uint8_t *buf, int oob_required, int page)
 {
-	struct brcmnand_host *host = nand_get_controller_data(chip);
+	struct brcmnand_host *host = chip->priv;
 	u8 *oob = oob_required ? (u8 *)chip->oob_poi : NULL;
 
 	return brcmnand_read(mtd, chip, host->last_addr,
@@ -1523,7 +1514,7 @@ static int brcmnand_read_page(struct mtd_info *mtd, struct nand_chip *chip,
 static int brcmnand_read_page_raw(struct mtd_info *mtd, struct nand_chip *chip,
 				  uint8_t *buf, int oob_required, int page)
 {
-	struct brcmnand_host *host = nand_get_controller_data(chip);
+	struct brcmnand_host *host = chip->priv;
 	u8 *oob = oob_required ? (u8 *)chip->oob_poi : NULL;
 	int ret;
 
@@ -1545,7 +1536,7 @@ static int brcmnand_read_oob(struct mtd_info *mtd, struct nand_chip *chip,
 static int brcmnand_read_oob_raw(struct mtd_info *mtd, struct nand_chip *chip,
 				 int page)
 {
-	struct brcmnand_host *host = nand_get_controller_data(chip);
+	struct brcmnand_host *host = chip->priv;
 
 	brcmnand_set_ecc_enabled(host, 0);
 	brcmnand_read(mtd, chip, (u64)page << chip->page_shift,
@@ -1555,10 +1546,20 @@ static int brcmnand_read_oob_raw(struct mtd_info *mtd, struct nand_chip *chip,
 	return 0;
 }
 
+static int brcmnand_read_subpage(struct mtd_info *mtd, struct nand_chip *chip,
+				 uint32_t data_offs, uint32_t readlen,
+				 uint8_t *bufpoi, int page)
+{
+	struct brcmnand_host *host = chip->priv;
+
+	return brcmnand_read(mtd, chip, host->last_addr + data_offs,
+			readlen >> FC_SHIFT, (u32 *)bufpoi, NULL);
+}
+
 static int brcmnand_write(struct mtd_info *mtd, struct nand_chip *chip,
 			  u64 addr, const u32 *buf, u8 *oob)
 {
-	struct brcmnand_host *host = nand_get_controller_data(chip);
+	struct brcmnand_host *host = chip->priv;
 	struct brcmnand_controller *ctrl = host->ctrl;
 	unsigned int i, j, trans = mtd->writesize >> FC_SHIFT;
 	int status, ret = 0;
@@ -1629,7 +1630,7 @@ out:
 static int brcmnand_write_page(struct mtd_info *mtd, struct nand_chip *chip,
 			       const uint8_t *buf, int oob_required, int page)
 {
-	struct brcmnand_host *host = nand_get_controller_data(chip);
+	struct brcmnand_host *host = chip->priv;
 	void *oob = oob_required ? chip->oob_poi : NULL;
 
 	brcmnand_write(mtd, chip, host->last_addr, (const u32 *)buf, oob);
@@ -1640,7 +1641,7 @@ static int brcmnand_write_page_raw(struct mtd_info *mtd,
 				   struct nand_chip *chip, const uint8_t *buf,
 				   int oob_required, int page)
 {
-	struct brcmnand_host *host = nand_get_controller_data(chip);
+	struct brcmnand_host *host = chip->priv;
 	void *oob = oob_required ? chip->oob_poi : NULL;
 
 	brcmnand_set_ecc_enabled(host, 0);
@@ -1659,7 +1660,7 @@ static int brcmnand_write_oob(struct mtd_info *mtd, struct nand_chip *chip,
 static int brcmnand_write_oob_raw(struct mtd_info *mtd, struct nand_chip *chip,
 				  int page)
 {
-	struct brcmnand_host *host = nand_get_controller_data(chip);
+	struct brcmnand_host *host = chip->priv;
 	int ret;
 
 	brcmnand_set_ecc_enabled(host, 0);
@@ -1805,7 +1806,7 @@ static inline int get_blk_adr_bytes(u64 size, u32 writesize)
 
 static int brcmnand_setup_dev(struct brcmnand_host *host)
 {
-	struct mtd_info *mtd = nand_to_mtd(&host->chip);
+	struct mtd_info *mtd = &host->mtd;
 	struct nand_chip *chip = &host->chip;
 	struct brcmnand_controller *ctrl = host->ctrl;
 	struct brcmnand_cfg *cfg = &host->hwcfg;
@@ -1815,7 +1816,7 @@ static int brcmnand_setup_dev(struct brcmnand_host *host)
 
 	memset(cfg, 0, sizeof(*cfg));
 
-	ret = of_property_read_u32(nand_get_flash_node(chip),
+	ret = of_property_read_u32(chip->flash_node,
 				   "brcm,nand-oob-sector-size",
 				   &oob_sector);
 	if (ret) {
@@ -1904,14 +1905,16 @@ static int brcmnand_setup_dev(struct brcmnand_host *host)
 	return 0;
 }
 
-static int brcmnand_init_cs(struct brcmnand_host *host, struct device_node *dn)
+static int brcmnand_init_cs(struct brcmnand_host *host)
 {
 	struct brcmnand_controller *ctrl = host->ctrl;
+	struct device_node *dn = host->of_node;
 	struct platform_device *pdev = host->pdev;
 	struct mtd_info *mtd;
 	struct nand_chip *chip;
 	int ret;
 	u16 cfg_offs;
+	struct mtd_part_parser_data ppdata = { .of_node = dn };
 
 	ret = of_property_read_u32(dn, "reg", &host->cs);
 	if (ret) {
@@ -1919,11 +1922,12 @@ static int brcmnand_init_cs(struct brcmnand_host *host, struct device_node *dn)
 		return -ENXIO;
 	}
 
-	mtd = nand_to_mtd(&host->chip);
+	mtd = &host->mtd;
 	chip = &host->chip;
 
-	nand_set_flash_node(chip, dn);
-	nand_set_controller_data(chip, host);
+	chip->flash_node = dn;
+	chip->priv = host;
+	mtd->priv = chip;
 	mtd->name = devm_kasprintf(&pdev->dev, GFP_KERNEL, "brcmnand.%d",
 				   host->cs);
 	mtd->owner = THIS_MODULE;
@@ -1941,6 +1945,7 @@ static int brcmnand_init_cs(struct brcmnand_host *host, struct device_node *dn)
 
 	chip->ecc.mode = NAND_ECC_HW;
 	chip->ecc.read_page = brcmnand_read_page;
+	chip->ecc.read_subpage = brcmnand_read_subpage;
 	chip->ecc.write_page = brcmnand_write_page;
 	chip->ecc.read_page_raw = brcmnand_read_page_raw;
 	chip->ecc.write_page_raw = brcmnand_write_page_raw;
@@ -1988,7 +1993,7 @@ static int brcmnand_init_cs(struct brcmnand_host *host, struct device_node *dn)
 	if (nand_scan_tail(mtd))
 		return -ENXIO;
 
-	return mtd_device_register(mtd, NULL, 0);
+	return mtd_device_parse_register(mtd, NULL, &ppdata, NULL, 0);
 }
 
 static void brcmnand_save_restore_cs_config(struct brcmnand_host *host,
@@ -2062,8 +2067,8 @@ static int brcmnand_resume(struct device *dev)
 	}
 
 	list_for_each_entry(host, &ctrl->host_list, node) {
-		struct nand_chip *chip = &host->chip;
-		struct mtd_info *mtd = nand_to_mtd(chip);
+		struct mtd_info *mtd = &host->mtd;
+		struct nand_chip *chip = mtd->priv;
 
 		brcmnand_save_restore_cs_config(host, 1);
 
@@ -2129,24 +2134,10 @@ int brcmnand_probe(struct platform_device *pdev, struct brcmnand_soc *soc)
 	if (IS_ERR(ctrl->nand_base))
 		return PTR_ERR(ctrl->nand_base);
 
-	/* Enable clock before using NAND registers */
-	ctrl->clk = devm_clk_get(dev, "nand");
-	if (!IS_ERR(ctrl->clk)) {
-		ret = clk_prepare_enable(ctrl->clk);
-		if (ret)
-			return ret;
-	} else {
-		ret = PTR_ERR(ctrl->clk);
-		if (ret == -EPROBE_DEFER)
-			return ret;
-
-		ctrl->clk = NULL;
-	}
-
 	/* Initialize NAND revision */
 	ret = brcmnand_revision_init(ctrl);
 	if (ret)
-		goto err;
+		return ret;
 
 	/*
 	 * Most chips have this cache at a fixed offset within 'nand' block.
@@ -2155,10 +2146,8 @@ int brcmnand_probe(struct platform_device *pdev, struct brcmnand_soc *soc)
 	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "nand-cache");
 	if (res) {
 		ctrl->nand_fc = devm_ioremap_resource(dev, res);
-		if (IS_ERR(ctrl->nand_fc)) {
-			ret = PTR_ERR(ctrl->nand_fc);
-			goto err;
-		}
+		if (IS_ERR(ctrl->nand_fc))
+			return PTR_ERR(ctrl->nand_fc);
 	} else {
 		ctrl->nand_fc = ctrl->nand_base +
 				ctrl->reg_offsets[BRCMNAND_FC_BASE];
@@ -2168,10 +2157,8 @@ int brcmnand_probe(struct platform_device *pdev, struct brcmnand_soc *soc)
 	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "flash-dma");
 	if (res) {
 		ctrl->flash_dma_base = devm_ioremap_resource(dev, res);
-		if (IS_ERR(ctrl->flash_dma_base)) {
-			ret = PTR_ERR(ctrl->flash_dma_base);
-			goto err;
-		}
+		if (IS_ERR(ctrl->flash_dma_base))
+			return PTR_ERR(ctrl->flash_dma_base);
 
 		flash_dma_writel(ctrl, FLASH_DMA_MODE, 1); /* linked-list */
 		flash_dma_writel(ctrl, FLASH_DMA_ERROR_STATUS, 0);
@@ -2180,16 +2167,13 @@ int brcmnand_probe(struct platform_device *pdev, struct brcmnand_soc *soc)
 		ctrl->dma_desc = dmam_alloc_coherent(dev,
 						     sizeof(*ctrl->dma_desc),
 						     &ctrl->dma_pa, GFP_KERNEL);
-		if (!ctrl->dma_desc) {
-			ret = -ENOMEM;
-			goto err;
-		}
+		if (!ctrl->dma_desc)
+			return -ENOMEM;
 
 		ctrl->dma_irq = platform_get_irq(pdev, 1);
 		if ((int)ctrl->dma_irq < 0) {
 			dev_err(dev, "missing FLASH_DMA IRQ\n");
-			ret = -ENODEV;
-			goto err;
+			return -ENODEV;
 		}
 
 		ret = devm_request_irq(dev, ctrl->dma_irq,
@@ -2198,7 +2182,7 @@ int brcmnand_probe(struct platform_device *pdev, struct brcmnand_soc *soc)
 		if (ret < 0) {
 			dev_err(dev, "can't allocate IRQ %d: error %d\n",
 					ctrl->dma_irq, ret);
-			goto err;
+			return ret;
 		}
 
 		dev_info(dev, "enabling FLASH_DMA\n");
@@ -2222,8 +2206,7 @@ int brcmnand_probe(struct platform_device *pdev, struct brcmnand_soc *soc)
 	ctrl->irq = platform_get_irq(pdev, 0);
 	if ((int)ctrl->irq < 0) {
 		dev_err(dev, "no IRQ defined\n");
-		ret = -ENODEV;
-		goto err;
+		return -ENODEV;
 	}
 
 	/*
@@ -2247,7 +2230,7 @@ int brcmnand_probe(struct platform_device *pdev, struct brcmnand_soc *soc)
 	if (ret < 0) {
 		dev_err(dev, "can't allocate IRQ %d: error %d\n",
 			ctrl->irq, ret);
-		goto err;
+		return ret;
 	}
 
 	for_each_available_child_of_node(dn, child) {
@@ -2255,36 +2238,25 @@ int brcmnand_probe(struct platform_device *pdev, struct brcmnand_soc *soc)
 			struct brcmnand_host *host;
 
 			host = devm_kzalloc(dev, sizeof(*host), GFP_KERNEL);
-			if (!host) {
-				of_node_put(child);
-				ret = -ENOMEM;
-				goto err;
-			}
+			if (!host)
+				return -ENOMEM;
 			host->pdev = pdev;
 			host->ctrl = ctrl;
+			host->of_node = child;
 
-			ret = brcmnand_init_cs(host, child);
-			if (ret) {
-				devm_kfree(dev, host);
+			ret = brcmnand_init_cs(host);
+			if (ret)
 				continue; /* Try all chip-selects */
-			}
 
 			list_add_tail(&host->node, &ctrl->host_list);
 		}
 	}
 
 	/* No chip-selects could initialize properly */
-	if (list_empty(&ctrl->host_list)) {
-		ret = -ENODEV;
-		goto err;
-	}
+	if (list_empty(&ctrl->host_list))
+		return -ENODEV;
 
 	return 0;
-
-err:
-	clk_disable_unprepare(ctrl->clk);
-	return ret;
-
 }
 EXPORT_SYMBOL_GPL(brcmnand_probe);
 
@@ -2294,9 +2266,7 @@ int brcmnand_remove(struct platform_device *pdev)
 	struct brcmnand_host *host;
 
 	list_for_each_entry(host, &ctrl->host_list, node)
-		nand_release(nand_to_mtd(&host->chip));
-
-	clk_disable_unprepare(ctrl->clk);
+		nand_release(&host->mtd);
 
 	dev_set_drvdata(&pdev->dev, NULL);
 

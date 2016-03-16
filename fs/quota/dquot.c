@@ -682,9 +682,9 @@ int dquot_quota_sync(struct super_block *sb, int type)
 			continue;
 		if (!sb_has_quota_active(sb, cnt))
 			continue;
-		inode_lock(dqopt->files[cnt]);
+		mutex_lock(&dqopt->files[cnt]->i_mutex);
 		truncate_inode_pages(&dqopt->files[cnt]->i_data, 0);
-		inode_unlock(dqopt->files[cnt]);
+		mutex_unlock(&dqopt->files[cnt]->i_mutex);
 	}
 	mutex_unlock(&dqopt->dqonoff_mutex);
 
@@ -2162,12 +2162,12 @@ int dquot_disable(struct super_block *sb, int type, unsigned int flags)
 			/* If quota was reenabled in the meantime, we have
 			 * nothing to do */
 			if (!sb_has_quota_loaded(sb, cnt)) {
-				inode_lock(toputinode[cnt]);
+				mutex_lock(&toputinode[cnt]->i_mutex);
 				toputinode[cnt]->i_flags &= ~(S_IMMUTABLE |
 				  S_NOATIME | S_NOQUOTA);
 				truncate_inode_pages(&toputinode[cnt]->i_data,
 						     0);
-				inode_unlock(toputinode[cnt]);
+				mutex_unlock(&toputinode[cnt]->i_mutex);
 				mark_inode_dirty_sync(toputinode[cnt]);
 			}
 			mutex_unlock(&dqopt->dqonoff_mutex);
@@ -2258,11 +2258,11 @@ static int vfs_load_quota_inode(struct inode *inode, int type, int format_id,
 		/* We don't want quota and atime on quota files (deadlocks
 		 * possible) Also nobody should write to the file - we use
 		 * special IO operations which ignore the immutable bit. */
-		inode_lock(inode);
+		mutex_lock(&inode->i_mutex);
 		oldflags = inode->i_flags & (S_NOATIME | S_IMMUTABLE |
 					     S_NOQUOTA);
 		inode->i_flags |= S_NOQUOTA | S_NOATIME | S_IMMUTABLE;
-		inode_unlock(inode);
+		mutex_unlock(&inode->i_mutex);
 		/*
 		 * When S_NOQUOTA is set, remove dquot references as no more
 		 * references can be added
@@ -2305,12 +2305,12 @@ out_file_init:
 	iput(inode);
 out_lock:
 	if (oldflags != -1) {
-		inode_lock(inode);
+		mutex_lock(&inode->i_mutex);
 		/* Set the flags back (in the case of accidental quotaon()
 		 * on a wrong file we don't want to mess up the flags) */
 		inode->i_flags &= ~(S_NOATIME | S_NOQUOTA | S_IMMUTABLE);
 		inode->i_flags |= oldflags;
-		inode_unlock(inode);
+		mutex_unlock(&inode->i_mutex);
 	}
 	mutex_unlock(&dqopt->dqonoff_mutex);
 out_fmt:
@@ -2430,9 +2430,9 @@ int dquot_quota_on_mount(struct super_block *sb, char *qf_name,
 	struct dentry *dentry;
 	int error;
 
-	inode_lock(d_inode(sb->s_root));
+	mutex_lock(&d_inode(sb->s_root)->i_mutex);
 	dentry = lookup_one_len(qf_name, sb->s_root, strlen(qf_name));
-	inode_unlock(d_inode(sb->s_root));
+	mutex_unlock(&d_inode(sb->s_root)->i_mutex);
 	if (IS_ERR(dentry))
 		return PTR_ERR(dentry);
 
@@ -2924,4 +2924,4 @@ static int __init dquot_init(void)
 
 	return 0;
 }
-fs_initcall(dquot_init);
+module_init(dquot_init);

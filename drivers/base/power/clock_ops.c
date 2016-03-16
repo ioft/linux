@@ -15,7 +15,6 @@
 #include <linux/clkdev.h>
 #include <linux/slab.h>
 #include <linux/err.h>
-#include <linux/pm_domain.h>
 #include <linux/pm_runtime.h>
 
 #ifdef CONFIG_PM_CLK
@@ -349,7 +348,7 @@ static int pm_clk_notify(struct notifier_block *nb,
 		if (error)
 			break;
 
-		dev_pm_domain_set(dev, clknb->pm_domain);
+		dev->pm_domain = clknb->pm_domain;
 		if (clknb->con_ids[0]) {
 			for (con_id = clknb->con_ids; *con_id; con_id++)
 				pm_clk_add(dev, *con_id);
@@ -362,7 +361,7 @@ static int pm_clk_notify(struct notifier_block *nb,
 		if (dev->pm_domain != clknb->pm_domain)
 			break;
 
-		dev_pm_domain_set(dev, NULL);
+		dev->pm_domain = NULL;
 		pm_clk_destroy(dev);
 		break;
 	}
@@ -474,7 +473,6 @@ static int pm_clk_notify(struct notifier_block *nb,
 			enable_clock(dev, NULL);
 		}
 		break;
-	case BUS_NOTIFY_DRIVER_NOT_BOUND:
 	case BUS_NOTIFY_UNBOUND_DRIVER:
 		if (clknb->con_ids[0]) {
 			for (con_id = clknb->con_ids; *con_id; con_id++)

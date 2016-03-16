@@ -582,7 +582,6 @@ static struct of_device_id rackmeter_match[] = {
 	{ .name = "i2s" },
 	{ }
 };
-MODULE_DEVICE_TABLE(of, rackmeter_match);
 
 static struct macio_driver rackmeter_driver = {
 	.driver = {

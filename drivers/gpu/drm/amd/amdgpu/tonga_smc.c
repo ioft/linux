@@ -25,7 +25,7 @@
 #include "drmP.h"
 #include "amdgpu.h"
 #include "tonga_ppsmc.h"
-#include "tonga_smum.h"
+#include "tonga_smumgr.h"
 #include "smu_ucode_xfer_vi.h"
 #include "amdgpu_ucode.h"
 

@@ -1127,11 +1127,11 @@ static int max77693_muic_probe(struct platform_device *pdev)
 	/* Support irq domain for MAX77693 MUIC device */
 	for (i = 0; i < ARRAY_SIZE(muic_irqs); i++) {
 		struct max77693_muic_irq *muic_irq = &muic_irqs[i];
-		int virq;
+		unsigned int virq = 0;
 
 		virq = regmap_irq_get_virq(max77693->irq_data_muic,
 					muic_irq->irq);
-		if (virq <= 0)
+		if (!virq)
 			return -EINVAL;
 		muic_irq->virq = virq;
 

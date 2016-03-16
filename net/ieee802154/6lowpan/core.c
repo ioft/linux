@@ -161,7 +161,9 @@ static int lowpan_newlink(struct net *src_net, struct net_device *ldev,
 				wdev->needed_headroom;
 	ldev->needed_tailroom = wdev->needed_tailroom;
 
-	ret = lowpan_register_netdevice(ldev, LOWPAN_LLTYPE_IEEE802154);
+	lowpan_netdev_setup(ldev, LOWPAN_LLTYPE_IEEE802154);
+
+	ret = register_netdevice(ldev);
 	if (ret < 0) {
 		dev_put(wdev);
 		return ret;
@@ -178,7 +180,7 @@ static void lowpan_dellink(struct net_device *ldev, struct list_head *head)
 	ASSERT_RTNL();
 
 	wdev->ieee802154_ptr->lowpan_dev = NULL;
-	lowpan_unregister_netdevice(ldev);
+	unregister_netdevice(ldev);
 	dev_put(wdev);
 }
 

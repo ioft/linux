@@ -26,6 +26,7 @@
 
 #include <linux/types.h>
 #ifndef __KERNEL__
+#include <stdint.h>
 #include <time.h>
 #endif
 

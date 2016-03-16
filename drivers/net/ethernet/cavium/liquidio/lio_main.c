@@ -1526,6 +1526,7 @@ static int liquidio_ptp_gettime(struct ptp_clock_info *ptp,
 				struct timespec64 *ts)
 {
 	u64 ns;
+	u32 remainder;
 	unsigned long flags;
 	struct lio *lio = container_of(ptp, struct lio, ptp_info);
 	struct octeon_device *oct = (struct octeon_device *)lio->oct_dev;
@@ -1535,7 +1536,8 @@ static int liquidio_ptp_gettime(struct ptp_clock_info *ptp,
 	ns += lio->ptp_adjust;
 	spin_unlock_irqrestore(&lio->ptp_lock, flags);
 
-	*ts = ns_to_timespec64(ns);
+	ts->tv_sec = div_u64_rem(ns, 1000000000ULL, &remainder);
+	ts->tv_nsec = remainder;
 
 	return 0;
 }
@@ -1683,7 +1685,7 @@ static int octeon_setup_droq(struct octeon_device *oct, int q_no, int num_descs,
 	dev_dbg(&oct->pci_dev->dev, "Creating Droq: %d\n", q_no);
 	/* droq creation and local register settings. */
 	ret_val = octeon_create_droq(oct, q_no, num_descs, desc_size, app_ctx);
-	if (ret_val < 0)
+	if (ret_val == -1)
 		return ret_val;
 
 	if (ret_val == 1) {
@@ -2524,7 +2526,7 @@ static void handle_timestamp(struct octeon_device *oct,
 
 	octeon_swap_8B_data(&resp->timestamp, 1);
 
-	if (unlikely((skb_shinfo(skb)->tx_flags & SKBTX_IN_PROGRESS) != 0)) {
+	if (unlikely((skb_shinfo(skb)->tx_flags | SKBTX_IN_PROGRESS) != 0)) {
 		struct skb_shared_hwtstamps ts;
 		u64 ns = resp->timestamp;
 

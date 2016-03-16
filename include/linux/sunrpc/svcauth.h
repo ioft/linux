@@ -23,19 +23,13 @@ struct svc_cred {
 	kgid_t			cr_gid;
 	struct group_info	*cr_group_info;
 	u32			cr_flavor; /* pseudoflavor */
-	/* name of form servicetype/hostname@REALM, passed down by
-	 * gss-proxy: */
-	char			*cr_raw_principal;
-	/* name of form servicetype@hostname, passed down by
-	 * rpc.svcgssd, or computed from the above: */
-	char			*cr_principal;
+	char			*cr_principal; /* for gss */
 	struct gss_api_mech	*cr_gss_mech;
 };
 
 static inline void init_svc_cred(struct svc_cred *cred)
 {
 	cred->cr_group_info = NULL;
-	cred->cr_raw_principal = NULL;
 	cred->cr_principal = NULL;
 	cred->cr_gss_mech = NULL;
 }
@@ -44,7 +38,6 @@ static inline void free_svc_cred(struct svc_cred *cred)
 {
 	if (cred->cr_group_info)
 		put_group_info(cred->cr_group_info);
-	kfree(cred->cr_raw_principal);
 	kfree(cred->cr_principal);
 	gss_mech_put(cred->cr_gss_mech);
 	init_svc_cred(cred);

@@ -43,7 +43,6 @@
 #include <linux/types.h>
 #include <linux/of_device.h>
 #include <linux/of_platform.h>
-#include <linux/pfn_t.h>
 
 #include <asm/page.h>
 #include <asm/prom.h>
@@ -143,13 +142,15 @@ axon_ram_make_request(struct request_queue *queue, struct bio *bio)
  */
 static long
 axon_ram_direct_access(struct block_device *device, sector_t sector,
-		       void __pmem **kaddr, pfn_t *pfn)
+		       void __pmem **kaddr, unsigned long *pfn)
 {
 	struct axon_ram_bank *bank = device->bd_disk->private_data;
 	loff_t offset = (loff_t)sector << AXON_RAM_SECTOR_SHIFT;
+	void *addr = (void *)(bank->ph_addr + offset);
 
-	*kaddr = (void __pmem __force *) bank->io_addr + offset;
-	*pfn = phys_to_pfn_t(bank->ph_addr + offset, PFN_DEV);
+	*kaddr = (void __pmem *)addr;
+	*pfn = virt_to_phys(addr) >> PAGE_SHIFT;
+
 	return bank->size - offset;
 }
 
@@ -312,7 +313,6 @@ static const struct of_device_id axon_ram_device_id[] = {
 	},
 	{}
 };
-MODULE_DEVICE_TABLE(of, axon_ram_device_id);
 
 static struct platform_driver axon_ram_driver = {
 	.probe		= axon_ram_probe,

@@ -228,8 +228,6 @@ static struct dma_async_tx_descriptor *hsu_dma_prep_slave_sg(
 	for_each_sg(sgl, sg, sg_len, i) {
 		desc->sg[i].addr = sg_dma_address(sg);
 		desc->sg[i].len = sg_dma_len(sg);
-
-		desc->length += sg_dma_len(sg);
 	}
 
 	desc->nents = sg_len;
@@ -251,10 +249,21 @@ static void hsu_dma_issue_pending(struct dma_chan *chan)
 	spin_unlock_irqrestore(&hsuc->vchan.lock, flags);
 }
 
+static size_t hsu_dma_desc_size(struct hsu_dma_desc *desc)
+{
+	size_t bytes = 0;
+	unsigned int i;
+
+	for (i = desc->active; i < desc->nents; i++)
+		bytes += desc->sg[i].len;
+
+	return bytes;
+}
+
 static size_t hsu_dma_active_desc_size(struct hsu_dma_chan *hsuc)
 {
 	struct hsu_dma_desc *desc = hsuc->desc;
-	size_t bytes = desc->length;
+	size_t bytes = hsu_dma_desc_size(desc);
 	int i;
 
 	i = desc->active % HSU_DMA_CHAN_NR_DESC;
@@ -285,7 +294,7 @@ static enum dma_status hsu_dma_tx_status(struct dma_chan *chan,
 		dma_set_residue(state, bytes);
 		status = hsuc->desc->status;
 	} else if (vdesc) {
-		bytes = to_hsu_dma_desc(vdesc)->length;
+		bytes = hsu_dma_desc_size(to_hsu_dma_desc(vdesc));
 		dma_set_residue(state, bytes);
 	}
 	spin_unlock_irqrestore(&hsuc->vchan.lock, flags);

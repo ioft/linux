@@ -269,8 +269,7 @@ our $Sparse	= qr{
 			__init_refok|
 			__kprobes|
 			__ref|
-			__rcu|
-			__private
+			__rcu
 		}x;
 our $InitAttributePrefix = qr{__(?:mem|cpu|dev|net_|)};
 our $InitAttributeData = qr{$InitAttributePrefix(?:initdata\b)};
@@ -434,28 +433,6 @@ our @typeList = (
 	qr{${Ident}_handler_fn},
 	@typeListMisordered,
 );
-
-our $C90_int_types = qr{(?x:
-	long\s+long\s+int\s+(?:un)?signed|
-	long\s+long\s+(?:un)?signed\s+int|
-	long\s+long\s+(?:un)?signed|
-	(?:(?:un)?signed\s+)?long\s+long\s+int|
-	(?:(?:un)?signed\s+)?long\s+long|
-	int\s+long\s+long\s+(?:un)?signed|
-	int\s+(?:(?:un)?signed\s+)?long\s+long|
-
-	long\s+int\s+(?:un)?signed|
-	long\s+(?:un)?signed\s+int|
-	long\s+(?:un)?signed|
-	(?:(?:un)?signed\s+)?long\s+int|
-	(?:(?:un)?signed\s+)?long|
-	int\s+long\s+(?:un)?signed|
-	int\s+(?:(?:un)?signed\s+)?long|
-
-	int\s+(?:un)?signed|
-	(?:(?:un)?signed\s+)?int
-)};
-
 our @typeListFile = ();
 our @typeListWithAttr = (
 	@typeList,
@@ -4540,7 +4517,7 @@ sub process {
 			#print "LINE<$lines[$ln-1]> len<" . length($lines[$ln-1]) . "\n";
 
 			$has_flow_statement = 1 if ($ctx =~ /\b(goto|return)\b/);
-			$has_arg_concat = 1 if ($ctx =~ /\#\#/ && $ctx !~ /\#\#\s*(?:__VA_ARGS__|args)\b/);
+			$has_arg_concat = 1 if ($ctx =~ /\#\#/);
 
 			$dstat =~ s/^.\s*\#\s*define\s+$Ident(?:\([^\)]*\))?\s*//;
 			$dstat =~ s/$;//g;
@@ -4551,7 +4528,7 @@ sub process {
 			# Flatten any parentheses and braces
 			while ($dstat =~ s/\([^\(\)]*\)/1/ ||
 			       $dstat =~ s/\{[^\{\}]*\}/1/ ||
-			       $dstat =~ s/.\[[^\[\]]*\]/1/)
+			       $dstat =~ s/\[[^\[\]]*\]/1/)
 			{
 			}
 
@@ -4571,8 +4548,7 @@ sub process {
 				union|
 				struct|
 				\.$Ident\s*=\s*|
-				^\"|\"$|
-				^\[
+				^\"|\"$
 			}x;
 			#print "REST<$rest> dstat<$dstat> ctx<$ctx>\n";
 			if ($dstat ne '' &&
@@ -5140,42 +5116,11 @@ sub process {
 			}
 		}
 # check for memory barriers without a comment.
-
-		my $barriers = qr{
-			mb|
-			rmb|
-			wmb|
-			read_barrier_depends
-		}x;
-		my $barrier_stems = qr{
-			mb__before_atomic|
-			mb__after_atomic|
-			store_release|
-			load_acquire|
-			store_mb|
-			(?:$barriers)
-		}x;
-		my $all_barriers = qr{
-			(?:$barriers)|
-			smp_(?:$barrier_stems)|
-			virt_(?:$barrier_stems)
-		}x;
-
-		if ($line =~ /\b(?:$all_barriers)\s*\(/) {
+		if ($line =~ /\b(mb|rmb|wmb|read_barrier_depends|smp_mb|smp_rmb|smp_wmb|smp_read_barrier_depends)\(/) {
 			if (!ctx_has_comment($first_line, $linenr)) {
 				WARN("MEMORY_BARRIER",
 				     "memory barrier without comment\n" . $herecurr);
 			}
-		}
-
-		my $underscore_smp_barriers = qr{__smp_(?:$barrier_stems)}x;
-
-		if ($realfile !~ m@^include/asm-generic/@ &&
-		    $realfile !~ m@/barrier\.h$@ &&
-		    $line =~ m/\b(?:$underscore_smp_barriers)\s*\(/ &&
-		    $line !~ m/^.\s*\#\s*define\s+(?:$underscore_smp_barriers)\s*\(/) {
-			WARN("MEMORY_BARRIER",
-			     "__smp memory barriers shouldn't be used outside barrier.h and asm-generic\n" . $herecurr);
 		}
 
 # check for waitqueue_active without a comment.
@@ -5293,26 +5238,6 @@ sub process {
 				    $fix) {
 					$fixed[$fixlinenr] =~ s/\b$type\b/$kernel_type/;
 				}
-			}
-		}
-
-# check for cast of C90 native int or longer types constants
-		if ($line =~ /(\(\s*$C90_int_types\s*\)\s*)($Constant)\b/) {
-			my $cast = $1;
-			my $const = $2;
-			if (WARN("TYPECAST_INT_CONSTANT",
-				 "Unnecessary typecast of c90 int constant\n" . $herecurr) &&
-			    $fix) {
-				my $suffix = "";
-				my $newconst = $const;
-				$newconst =~ s/${Int_type}$//;
-				$suffix .= 'U' if ($cast =~ /\bunsigned\b/);
-				if ($cast =~ /\blong\s+long\b/) {
-					$suffix .= 'LL';
-				} elsif ($cast =~ /\blong\b/) {
-					$suffix .= 'L';
-				}
-				$fixed[$fixlinenr] =~ s/\Q$cast\E$const\b/$newconst$suffix/;
 			}
 		}
 

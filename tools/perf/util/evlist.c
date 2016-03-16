@@ -18,7 +18,7 @@
 #include <unistd.h>
 
 #include "parse-events.h"
-#include <subcmd/parse-options.h>
+#include "parse-options.h"
 
 #include <sys/mman.h>
 
@@ -61,18 +61,6 @@ struct perf_evlist *perf_evlist__new_default(void)
 	struct perf_evlist *evlist = perf_evlist__new();
 
 	if (evlist && perf_evlist__add_default(evlist)) {
-		perf_evlist__delete(evlist);
-		evlist = NULL;
-	}
-
-	return evlist;
-}
-
-struct perf_evlist *perf_evlist__new_dummy(void)
-{
-	struct perf_evlist *evlist = perf_evlist__new();
-
-	if (evlist && perf_evlist__add_dummy(evlist)) {
 		perf_evlist__delete(evlist);
 		evlist = NULL;
 	}
@@ -260,22 +248,6 @@ error:
 	return -ENOMEM;
 }
 
-int perf_evlist__add_dummy(struct perf_evlist *evlist)
-{
-	struct perf_event_attr attr = {
-		.type	= PERF_TYPE_SOFTWARE,
-		.config = PERF_COUNT_SW_DUMMY,
-		.size	= sizeof(attr), /* to capture ABI version */
-	};
-	struct perf_evsel *evsel = perf_evsel__new(&attr);
-
-	if (evsel == NULL)
-		return -ENOMEM;
-
-	perf_evlist__add(evlist, evsel);
-	return 0;
-}
-
 static int perf_evlist__add_attrs(struct perf_evlist *evlist,
 				  struct perf_event_attr *attrs, size_t nr_attrs)
 {
@@ -364,12 +336,20 @@ static int perf_evlist__nr_threads(struct perf_evlist *evlist,
 
 void perf_evlist__disable(struct perf_evlist *evlist)
 {
+	int cpu, thread;
 	struct perf_evsel *pos;
+	int nr_cpus = cpu_map__nr(evlist->cpus);
+	int nr_threads;
 
-	evlist__for_each(evlist, pos) {
-		if (!perf_evsel__is_group_leader(pos) || !pos->fd)
-			continue;
-		perf_evsel__disable(pos);
+	for (cpu = 0; cpu < nr_cpus; cpu++) {
+		evlist__for_each(evlist, pos) {
+			if (!perf_evsel__is_group_leader(pos) || !pos->fd)
+				continue;
+			nr_threads = perf_evlist__nr_threads(evlist, pos);
+			for (thread = 0; thread < nr_threads; thread++)
+				ioctl(FD(pos, cpu, thread),
+				      PERF_EVENT_IOC_DISABLE, 0);
+		}
 	}
 
 	evlist->enabled = false;
@@ -377,12 +357,20 @@ void perf_evlist__disable(struct perf_evlist *evlist)
 
 void perf_evlist__enable(struct perf_evlist *evlist)
 {
+	int cpu, thread;
 	struct perf_evsel *pos;
+	int nr_cpus = cpu_map__nr(evlist->cpus);
+	int nr_threads;
 
-	evlist__for_each(evlist, pos) {
-		if (!perf_evsel__is_group_leader(pos) || !pos->fd)
-			continue;
-		perf_evsel__enable(pos);
+	for (cpu = 0; cpu < nr_cpus; cpu++) {
+		evlist__for_each(evlist, pos) {
+			if (!perf_evsel__is_group_leader(pos) || !pos->fd)
+				continue;
+			nr_threads = perf_evlist__nr_threads(evlist, pos);
+			for (thread = 0; thread < nr_threads; thread++)
+				ioctl(FD(pos, cpu, thread),
+				      PERF_EVENT_IOC_ENABLE, 0);
+		}
 	}
 
 	evlist->enabled = true;
@@ -391,6 +379,48 @@ void perf_evlist__enable(struct perf_evlist *evlist)
 void perf_evlist__toggle_enable(struct perf_evlist *evlist)
 {
 	(evlist->enabled ? perf_evlist__disable : perf_evlist__enable)(evlist);
+}
+
+int perf_evlist__disable_event(struct perf_evlist *evlist,
+			       struct perf_evsel *evsel)
+{
+	int cpu, thread, err;
+	int nr_cpus = cpu_map__nr(evlist->cpus);
+	int nr_threads = perf_evlist__nr_threads(evlist, evsel);
+
+	if (!evsel->fd)
+		return 0;
+
+	for (cpu = 0; cpu < nr_cpus; cpu++) {
+		for (thread = 0; thread < nr_threads; thread++) {
+			err = ioctl(FD(evsel, cpu, thread),
+				    PERF_EVENT_IOC_DISABLE, 0);
+			if (err)
+				return err;
+		}
+	}
+	return 0;
+}
+
+int perf_evlist__enable_event(struct perf_evlist *evlist,
+			      struct perf_evsel *evsel)
+{
+	int cpu, thread, err;
+	int nr_cpus = cpu_map__nr(evlist->cpus);
+	int nr_threads = perf_evlist__nr_threads(evlist, evsel);
+
+	if (!evsel->fd)
+		return -EINVAL;
+
+	for (cpu = 0; cpu < nr_cpus; cpu++) {
+		for (thread = 0; thread < nr_threads; thread++) {
+			err = ioctl(FD(evsel, cpu, thread),
+				    PERF_EVENT_IOC_ENABLE, 0);
+			if (err)
+				return err;
+		}
+	}
+	return 0;
 }
 
 static int perf_evlist__enable_event_cpu(struct perf_evlist *evlist,
@@ -520,9 +550,9 @@ void perf_evlist__id_add(struct perf_evlist *evlist, struct perf_evsel *evsel,
 	evsel->id[evsel->ids++] = id;
 }
 
-int perf_evlist__id_add_fd(struct perf_evlist *evlist,
-			   struct perf_evsel *evsel,
-			   int cpu, int thread, int fd)
+static int perf_evlist__id_add_fd(struct perf_evlist *evlist,
+				  struct perf_evsel *evsel,
+				  int cpu, int thread, int fd)
 {
 	u64 read_data[4] = { 0, };
 	int id_idx = 1; /* The first entry is the counter value */
@@ -1181,12 +1211,12 @@ void perf_evlist__set_maps(struct perf_evlist *evlist, struct cpu_map *cpus,
 	 */
 	if (cpus != evlist->cpus) {
 		cpu_map__put(evlist->cpus);
-		evlist->cpus = cpu_map__get(cpus);
+		evlist->cpus = cpus;
 	}
 
 	if (threads != evlist->threads) {
 		thread_map__put(evlist->threads);
-		evlist->threads = thread_map__get(threads);
+		evlist->threads = threads;
 	}
 
 	perf_evlist__propagate_maps(evlist);
@@ -1223,9 +1253,6 @@ int perf_evlist__set_filter(struct perf_evlist *evlist, const char *filter)
 	int err = 0;
 
 	evlist__for_each(evlist, evsel) {
-		if (evsel->attr.type != PERF_TYPE_TRACEPOINT)
-			continue;
-
 		err = perf_evsel__set_filter(evsel, filter);
 		if (err)
 			break;
@@ -1459,7 +1486,7 @@ int perf_evlist__open(struct perf_evlist *evlist)
 	perf_evlist__update_id_pos(evlist);
 
 	evlist__for_each(evlist, evsel) {
-		err = perf_evsel__open(evsel, evsel->cpus, evsel->threads);
+		err = perf_evsel__open(evsel, evlist->cpus, evlist->threads);
 		if (err < 0)
 			goto out_err;
 	}
@@ -1627,7 +1654,7 @@ size_t perf_evlist__fprintf(struct perf_evlist *evlist, FILE *fp)
 	return printed + fprintf(fp, "\n");
 }
 
-int perf_evlist__strerror_open(struct perf_evlist *evlist,
+int perf_evlist__strerror_open(struct perf_evlist *evlist __maybe_unused,
 			       int err, char *buf, size_t size)
 {
 	int printed, value;
@@ -1655,25 +1682,7 @@ int perf_evlist__strerror_open(struct perf_evlist *evlist,
 				    "Hint:\tTry: 'sudo sh -c \"echo -1 > /proc/sys/kernel/perf_event_paranoid\"'\n"
 				    "Hint:\tThe current value is %d.", value);
 		break;
-	case EINVAL: {
-		struct perf_evsel *first = perf_evlist__first(evlist);
-		int max_freq;
-
-		if (sysctl__read_int("kernel/perf_event_max_sample_rate", &max_freq) < 0)
-			goto out_default;
-
-		if (first->attr.sample_freq < (u64)max_freq)
-			goto out_default;
-
-		printed = scnprintf(buf, size,
-				    "Error:\t%s.\n"
-				    "Hint:\tCheck /proc/sys/kernel/perf_event_max_sample_rate.\n"
-				    "Hint:\tThe current value is %d and %" PRIu64 " is being requested.",
-				    emsg, max_freq, first->attr.sample_freq);
-		break;
-	}
 	default:
-out_default:
 		scnprintf(buf, size, "%s", emsg);
 		break;
 	}
@@ -1743,20 +1752,4 @@ void perf_evlist__set_tracking_event(struct perf_evlist *evlist,
 	}
 
 	tracking_evsel->tracking = true;
-}
-
-struct perf_evsel *
-perf_evlist__find_evsel_by_str(struct perf_evlist *evlist,
-			       const char *str)
-{
-	struct perf_evsel *evsel;
-
-	evlist__for_each(evlist, evsel) {
-		if (!evsel->name)
-			continue;
-		if (strcmp(str, evsel->name) == 0)
-			return evsel;
-	}
-
-	return NULL;
 }

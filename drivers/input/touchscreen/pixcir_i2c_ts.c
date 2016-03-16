@@ -38,8 +38,6 @@ struct pixcir_i2c_ts_data {
 	struct input_dev *input;
 	struct gpio_desc *gpio_attb;
 	struct gpio_desc *gpio_reset;
-	struct gpio_desc *gpio_enable;
-	struct gpio_desc *gpio_wake;
 	const struct pixcir_i2c_chip_data *chip;
 	int max_fingers;	/* Max fingers supported in this instance */
 	bool running;
@@ -210,11 +208,6 @@ static int pixcir_set_power_mode(struct pixcir_i2c_ts_data *ts,
 	struct device *dev = &ts->client->dev;
 	int ret;
 
-	if (mode == PIXCIR_POWER_ACTIVE || mode == PIXCIR_POWER_IDLE) {
-		if (ts->gpio_wake)
-			gpiod_set_value_cansleep(ts->gpio_wake, 1);
-	}
-
 	ret = i2c_smbus_read_byte_data(ts->client, PIXCIR_REG_POWER_MODE);
 	if (ret < 0) {
 		dev_err(dev, "%s: can't read reg 0x%x : %d\n",
@@ -233,11 +226,6 @@ static int pixcir_set_power_mode(struct pixcir_i2c_ts_data *ts,
 		dev_err(dev, "%s: can't write reg 0x%x : %d\n",
 			__func__, PIXCIR_REG_POWER_MODE, ret);
 		return ret;
-	}
-
-	if (mode == PIXCIR_POWER_HALT) {
-		if (ts->gpio_wake)
-			gpiod_set_value_cansleep(ts->gpio_wake, 0);
 	}
 
 	return 0;
@@ -314,11 +302,6 @@ static int pixcir_start(struct pixcir_i2c_ts_data *ts)
 	struct device *dev = &ts->client->dev;
 	int error;
 
-	if (ts->gpio_enable) {
-		gpiod_set_value_cansleep(ts->gpio_enable, 1);
-		msleep(100);
-	}
-
 	/* LEVEL_TOUCH interrupt with active low polarity */
 	error = pixcir_set_int_mode(ts, PIXCIR_INT_LEVEL_TOUCH, 0);
 	if (error) {
@@ -359,9 +342,6 @@ static int pixcir_stop(struct pixcir_i2c_ts_data *ts)
 
 	/* Wait till running ISR is complete */
 	synchronize_irq(ts->client->irq);
-
-	if (ts->gpio_enable)
-		gpiod_set_value_cansleep(ts->gpio_enable, 0);
 
 	return 0;
 }
@@ -553,27 +533,6 @@ static int pixcir_i2c_ts_probe(struct i2c_client *client,
 		dev_err(dev, "Failed to request RESET gpio: %d\n", error);
 		return error;
 	}
-
-	tsdata->gpio_wake = devm_gpiod_get_optional(dev, "wake",
-						    GPIOD_OUT_HIGH);
-	if (IS_ERR(tsdata->gpio_wake)) {
-		error = PTR_ERR(tsdata->gpio_wake);
-		if (error != -EPROBE_DEFER)
-			dev_err(dev, "Failed to get wake gpio: %d\n", error);
-		return error;
-	}
-
-	tsdata->gpio_enable = devm_gpiod_get_optional(dev, "enable",
-						      GPIOD_OUT_HIGH);
-	if (IS_ERR(tsdata->gpio_enable)) {
-		error = PTR_ERR(tsdata->gpio_enable);
-		if (error != -EPROBE_DEFER)
-			dev_err(dev, "Failed to get enable gpio: %d\n", error);
-		return error;
-	}
-
-	if (tsdata->gpio_enable)
-		msleep(100);
 
 	error = devm_request_threaded_irq(dev, client->irq, NULL, pixcir_ts_isr,
 					  IRQF_TRIGGER_FALLING | IRQF_ONESHOT,

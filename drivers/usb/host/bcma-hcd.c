@@ -21,7 +21,6 @@
  */
 #include <linux/bcma/bcma.h>
 #include <linux/delay.h>
-#include <linux/gpio/consumer.h>
 #include <linux/platform_device.h>
 #include <linux/module.h>
 #include <linux/slab.h>
@@ -37,7 +36,6 @@ MODULE_LICENSE("GPL");
 struct bcma_hcd_device {
 	struct platform_device *ehci_dev;
 	struct platform_device *ohci_dev;
-	struct gpio_desc *gpio_desc;
 };
 
 /* Wait for bitmask in a register to get set or cleared.
@@ -230,12 +228,19 @@ static void bcma_hcd_init_chip_arm(struct bcma_device *dev)
 
 static void bcma_hci_platform_power_gpio(struct bcma_device *dev, bool val)
 {
-	struct bcma_hcd_device *usb_dev = bcma_get_drvdata(dev);
+	int gpio;
 
-	if (IS_ERR_OR_NULL(usb_dev->gpio_desc))
+	gpio = of_get_named_gpio(dev->dev.of_node, "vcc-gpio", 0);
+	if (!gpio_is_valid(gpio))
 		return;
 
-	gpiod_set_value(usb_dev->gpio_desc, val);
+	if (val) {
+		gpio_request(gpio, "bcma-hcd-gpio");
+		gpio_set_value(gpio, 1);
+	} else {
+		gpio_set_value(gpio, 0);
+		gpio_free(gpio);
+	}
 }
 
 static const struct usb_ehci_pdata ehci_pdata = {
@@ -309,11 +314,7 @@ static int bcma_hcd_probe(struct bcma_device *dev)
 	if (!usb_dev)
 		return -ENOMEM;
 
-	if (dev->dev.of_node)
-		usb_dev->gpio_desc = devm_get_gpiod_from_child(&dev->dev, "vcc",
-							       &dev->dev.of_node->fwnode);
-	if (!IS_ERR_OR_NULL(usb_dev->gpio_desc))
-		gpiod_direction_output(usb_dev->gpio_desc, 1);
+	bcma_hci_platform_power_gpio(dev, true);
 
 	switch (dev->id.id) {
 	case BCMA_CORE_NS_USB20:

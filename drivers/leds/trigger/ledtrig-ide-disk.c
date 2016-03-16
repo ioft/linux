@@ -11,6 +11,7 @@
  *
  */
 
+#include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/leds.h>
@@ -32,4 +33,15 @@ static int __init ledtrig_ide_init(void)
 	led_trigger_register_simple("ide-disk", &ledtrig_ide);
 	return 0;
 }
-device_initcall(ledtrig_ide_init);
+
+static void __exit ledtrig_ide_exit(void)
+{
+	led_trigger_unregister_simple(ledtrig_ide);
+}
+
+module_init(ledtrig_ide_init);
+module_exit(ledtrig_ide_exit);
+
+MODULE_AUTHOR("Richard Purdie <rpurdie@openedhand.com>");
+MODULE_DESCRIPTION("LED IDE Disk Activity Trigger");
+MODULE_LICENSE("GPL");

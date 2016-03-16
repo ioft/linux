@@ -30,9 +30,19 @@ user_set(const struct xattr_handler *handler, struct dentry *dentry,
 	return reiserfs_xattr_set(d_inode(dentry), name, buffer, size, flags);
 }
 
-static bool user_list(struct dentry *dentry)
+static size_t user_list(const struct xattr_handler *handler,
+			struct dentry *dentry, char *list, size_t list_size,
+			const char *name, size_t name_len)
 {
-	return reiserfs_xattrs_user(dentry->d_sb);
+	const size_t len = name_len + 1;
+
+	if (!reiserfs_xattrs_user(dentry->d_sb))
+		return 0;
+	if (list && len <= list_size) {
+		memcpy(list, name, name_len);
+		list[name_len] = '\0';
+	}
+	return len;
 }
 
 const struct xattr_handler reiserfs_xattr_user_handler = {

@@ -170,7 +170,7 @@ static int armada_xp_cpu_kill(unsigned int cpu)
 }
 #endif
 
-const struct smp_operations armada_xp_smp_ops __initconst = {
+struct smp_operations armada_xp_smp_ops __initdata = {
 	.smp_init_cpus		= armada_xp_smp_init_cpus,
 	.smp_prepare_cpus	= armada_xp_smp_prepare_cpus,
 	.smp_boot_secondary	= armada_xp_boot_secondary,

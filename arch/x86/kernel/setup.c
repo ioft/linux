@@ -152,21 +152,21 @@ static struct resource data_resource = {
 	.name	= "Kernel data",
 	.start	= 0,
 	.end	= 0,
-	.flags	= IORESOURCE_BUSY | IORESOURCE_SYSTEM_RAM
+	.flags	= IORESOURCE_BUSY | IORESOURCE_MEM
 };
 
 static struct resource code_resource = {
 	.name	= "Kernel code",
 	.start	= 0,
 	.end	= 0,
-	.flags	= IORESOURCE_BUSY | IORESOURCE_SYSTEM_RAM
+	.flags	= IORESOURCE_BUSY | IORESOURCE_MEM
 };
 
 static struct resource bss_resource = {
 	.name	= "Kernel bss",
 	.start	= 0,
 	.end	= 0,
-	.flags	= IORESOURCE_BUSY | IORESOURCE_SYSTEM_RAM
+	.flags	= IORESOURCE_BUSY | IORESOURCE_MEM
 };
 
 
@@ -1047,8 +1047,6 @@ void __init setup_arch(char **cmdline_p)
 	mtrr_bp_init();
 	if (mtrr_trim_uncached_memory(max_pfn))
 		max_pfn = e820_end_of_ram_pfn();
-
-	max_possible_pfn = max_pfn;
 
 #ifdef CONFIG_X86_32
 	/* max_low_pfn get updated here */

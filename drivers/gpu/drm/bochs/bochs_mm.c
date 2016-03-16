@@ -484,7 +484,7 @@ static const struct drm_framebuffer_funcs bochs_fb_funcs = {
 
 int bochs_framebuffer_init(struct drm_device *dev,
 			   struct bochs_framebuffer *gfb,
-			   const struct drm_mode_fb_cmd2 *mode_cmd,
+			   struct drm_mode_fb_cmd2 *mode_cmd,
 			   struct drm_gem_object *obj)
 {
 	int ret;
@@ -502,7 +502,7 @@ int bochs_framebuffer_init(struct drm_device *dev,
 static struct drm_framebuffer *
 bochs_user_framebuffer_create(struct drm_device *dev,
 			      struct drm_file *filp,
-			      const struct drm_mode_fb_cmd2 *mode_cmd)
+			      struct drm_mode_fb_cmd2 *mode_cmd)
 {
 	struct drm_gem_object *obj;
 	struct bochs_framebuffer *bochs_fb;

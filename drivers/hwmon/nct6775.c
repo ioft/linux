@@ -1045,8 +1045,7 @@ struct sensor_template_group {
 };
 
 static struct attribute_group *
-nct6775_create_attr_group(struct device *dev,
-			  const struct sensor_template_group *tg,
+nct6775_create_attr_group(struct device *dev, struct sensor_template_group *tg,
 			  int repeat)
 {
 	struct attribute_group *group;
@@ -1828,7 +1827,7 @@ static struct sensor_device_template *nct6775_attributes_in_template[] = {
 	NULL
 };
 
-static const struct sensor_template_group nct6775_in_template_group = {
+static struct sensor_template_group nct6775_in_template_group = {
 	.templates = nct6775_attributes_in_template,
 	.is_visible = nct6775_in_is_visible,
 };
@@ -2047,7 +2046,7 @@ static struct sensor_device_template *nct6775_attributes_fan_template[] = {
 	NULL
 };
 
-static const struct sensor_template_group nct6775_fan_template_group = {
+static struct sensor_template_group nct6775_fan_template_group = {
 	.templates = nct6775_attributes_fan_template,
 	.is_visible = nct6775_fan_is_visible,
 	.base = 1,
@@ -2256,7 +2255,7 @@ static struct sensor_device_template *nct6775_attributes_temp_template[] = {
 	NULL
 };
 
-static const struct sensor_template_group nct6775_temp_template_group = {
+static struct sensor_template_group nct6775_temp_template_group = {
 	.templates = nct6775_attributes_temp_template,
 	.is_visible = nct6775_temp_is_visible,
 	.base = 1,
@@ -3118,7 +3117,7 @@ static struct sensor_device_template *nct6775_attributes_pwm_template[] = {
 	NULL
 };
 
-static const struct sensor_template_group nct6775_pwm_template_group = {
+static struct sensor_template_group nct6775_pwm_template_group = {
 	.templates = nct6775_attributes_pwm_template,
 	.is_visible = nct6775_pwm_is_visible,
 	.base = 1,

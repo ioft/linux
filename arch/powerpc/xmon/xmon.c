@@ -320,7 +320,6 @@ static inline void disable_surveillance(void)
 #ifdef CONFIG_PPC_PSERIES
 	/* Since this can't be a module, args should end up below 4GB. */
 	static struct rtas_args args;
-	int token;
 
 	/*
 	 * At this point we have got all the cpus we can into
@@ -329,12 +328,17 @@ static inline void disable_surveillance(void)
 	 * If we did try to take rtas.lock there would be a
 	 * real possibility of deadlock.
 	 */
-	token = rtas_token("set-indicator");
-	if (token == RTAS_UNKNOWN_SERVICE)
+	args.token = rtas_token("set-indicator");
+	if (args.token == RTAS_UNKNOWN_SERVICE)
 		return;
-
-	rtas_call_unlocked(&args, token, 3, 1, NULL, SURVEILLANCE_TOKEN, 0, 0);
-
+	args.token = cpu_to_be32(args.token);
+	args.nargs = cpu_to_be32(3);
+	args.nret = cpu_to_be32(1);
+	args.rets = &args.args[3];
+	args.args[0] = cpu_to_be32(SURVEILLANCE_TOKEN);
+	args.args[1] = 0;
+	args.args[2] = 0;
+	enter_rtas(__pa(&args));
 #endif /* CONFIG_PPC_PSERIES */
 }
 
@@ -1518,8 +1522,6 @@ static void excprint(struct pt_regs *fp)
 
 	if (trap == 0x700)
 		print_bug_trap(fp);
-
-	printf(linux_banner);
 }
 
 static void prregs(struct pt_regs *fp)

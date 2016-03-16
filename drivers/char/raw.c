@@ -71,7 +71,7 @@ static int raw_open(struct inode *inode, struct file *filp)
 	err = -ENODEV;
 	if (!bdev)
 		goto out;
-	bdgrab(bdev);
+	igrab(bdev->bd_inode);
 	err = blkdev_get(bdev, filp->f_mode | FMODE_EXCL, raw_open);
 	if (err)
 		goto out;

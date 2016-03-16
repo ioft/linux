@@ -160,8 +160,7 @@ void pio_copy(struct hfi1_devdata *dd, struct pio_buf *pbuf, u64 pbc,
 	}
 
 	/* finished with this buffer */
-	this_cpu_dec(*pbuf->sc->buffers_allocated);
-	preempt_enable();
+	atomic_dec(&pbuf->sc->buffers_allocated);
 }
 
 /* USE_SHIFTS is faster in user-space tests on a Xeon X5570 @ 2.93GHz */
@@ -855,6 +854,5 @@ void seg_pio_copy_end(struct pio_buf *pbuf)
 	}
 
 	/* finished with this buffer */
-	this_cpu_dec(*pbuf->sc->buffers_allocated);
-	preempt_enable();
+	atomic_dec(&pbuf->sc->buffers_allocated);
 }

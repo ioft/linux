@@ -17,6 +17,7 @@
 #include <linux/spi/spi.h>
 #include <linux/usb/atmel_usba_udc.h>
 
+#include <linux/platform_data/mmc-atmel-mci.h>
 #include <linux/atmel-mci.h>
 
 #include <asm/io.h>
@@ -1320,26 +1321,11 @@ static struct clk atmel_mci0_pclk = {
 	.index		= 9,
 };
 
-static bool at32_mci_dma_filter(struct dma_chan *chan, void *pdata)
-{
-	struct dw_dma_slave *sl = pdata;
-
-	if (!sl)
-		return false;
-
-	if (sl->dma_dev == chan->device->dev) {
-		chan->private = sl;
-		return true;
-	}
-
-	return false;
-}
-
 struct platform_device *__init
 at32_add_device_mci(unsigned int id, struct mci_platform_data *data)
 {
 	struct platform_device		*pdev;
-	struct dw_dma_slave	        *slave;
+	struct mci_dma_data	        *slave;
 	u32				pioa_mask;
 	u32				piob_mask;
 
@@ -1358,18 +1344,17 @@ at32_add_device_mci(unsigned int id, struct mci_platform_data *data)
 				ARRAY_SIZE(atmel_mci0_resource)))
 		goto fail;
 
-	slave = kzalloc(sizeof(*slave), GFP_KERNEL);
+	slave = kzalloc(sizeof(struct mci_dma_data), GFP_KERNEL);
 	if (!slave)
 		goto fail;
 
-	slave->dma_dev = &dw_dmac0_device.dev;
-	slave->src_id = 0;
-	slave->dst_id = 1;
-	slave->src_master = 1;
-	slave->dst_master = 0;
+	slave->sdata.dma_dev = &dw_dmac0_device.dev;
+	slave->sdata.src_id = 0;
+	slave->sdata.dst_id = 1;
+	slave->sdata.src_master = 1;
+	slave->sdata.dst_master = 0;
 
 	data->dma_slave = slave;
-	data->dma_filter = at32_mci_dma_filter;
 
 	if (platform_device_add_data(pdev, data,
 				sizeof(struct mci_platform_data)))

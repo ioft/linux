@@ -882,7 +882,7 @@ static int __init node_neighbors(int node, int cpu,
 
 static void __init setup_numa_mapping(void)
 {
-	u8 distance[MAX_NUMNODES][NR_CPUS];
+	int distance[MAX_NUMNODES][NR_CPUS];
 	HV_Coord coord;
 	int cpu, node, cpus, i, x, y;
 	int num_nodes = num_online_nodes();
@@ -1632,14 +1632,14 @@ static struct resource data_resource = {
 	.name	= "Kernel data",
 	.start	= 0,
 	.end	= 0,
-	.flags	= IORESOURCE_BUSY | IORESOURCE_SYSTEM_RAM
+	.flags	= IORESOURCE_BUSY | IORESOURCE_MEM
 };
 
 static struct resource code_resource = {
 	.name	= "Kernel code",
 	.start	= 0,
 	.end	= 0,
-	.flags	= IORESOURCE_BUSY | IORESOURCE_SYSTEM_RAM
+	.flags	= IORESOURCE_BUSY | IORESOURCE_MEM
 };
 
 /*
@@ -1673,15 +1673,10 @@ insert_ram_resource(u64 start_pfn, u64 end_pfn, bool reserved)
 		kzalloc(sizeof(struct resource), GFP_ATOMIC);
 	if (!res)
 		return NULL;
+	res->name = reserved ? "Reserved" : "System RAM";
 	res->start = start_pfn << PAGE_SHIFT;
 	res->end = (end_pfn << PAGE_SHIFT) - 1;
 	res->flags = IORESOURCE_BUSY | IORESOURCE_MEM;
-	if (reserved) {
-		res->name = "Reserved";
-	} else {
-		res->name = "System RAM";
-		res->flags |= IORESOURCE_SYSRAM;
-	}
 	if (insert_resource(&iomem_resource, res)) {
 		kfree(res);
 		return NULL;

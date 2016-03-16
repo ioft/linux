@@ -14,9 +14,8 @@
  * (C) Copyright 2013-2015 Hewlett-Packard Development Company, L.P.
  * (C) Copyright 2013-2014 Red Hat, Inc.
  * (C) Copyright 2015 Intel Corp.
- * (C) Copyright 2015 Hewlett-Packard Enterprise Development LP
  *
- * Authors: Waiman Long <waiman.long@hpe.com>
+ * Authors: Waiman Long <waiman.long@hp.com>
  *          Peter Zijlstra <peterz@infradead.org>
  */
 
@@ -177,12 +176,7 @@ static __always_inline u32 xchg_tail(struct qspinlock *lock, u32 tail)
 {
 	struct __qspinlock *l = (void *)lock;
 
-	/*
-	 * Use release semantics to make sure that the MCS node is properly
-	 * initialized before changing the tail code.
-	 */
-	return (u32)xchg_release(&l->tail,
-				 tail >> _Q_TAIL_OFFSET) << _Q_TAIL_OFFSET;
+	return (u32)xchg(&l->tail, tail >> _Q_TAIL_OFFSET) << _Q_TAIL_OFFSET;
 }
 
 #else /* _Q_PENDING_BITS == 8 */
@@ -214,11 +208,7 @@ static __always_inline u32 xchg_tail(struct qspinlock *lock, u32 tail)
 
 	for (;;) {
 		new = (val & _Q_LOCKED_PENDING_MASK) | tail;
-		/*
-		 * Use release semantics to make sure that the MCS node is
-		 * properly initialized before changing the tail code.
-		 */
-		old = atomic_cmpxchg_release(&lock->val, val, new);
+		old = atomic_cmpxchg(&lock->val, val, new);
 		if (old == val)
 			break;
 
@@ -248,20 +238,18 @@ static __always_inline void set_locked(struct qspinlock *lock)
  */
 
 static __always_inline void __pv_init_node(struct mcs_spinlock *node) { }
-static __always_inline void __pv_wait_node(struct mcs_spinlock *node,
-					   struct mcs_spinlock *prev) { }
+static __always_inline void __pv_wait_node(struct mcs_spinlock *node) { }
 static __always_inline void __pv_kick_node(struct qspinlock *lock,
 					   struct mcs_spinlock *node) { }
-static __always_inline u32  __pv_wait_head_or_lock(struct qspinlock *lock,
-						   struct mcs_spinlock *node)
-						   { return 0; }
+static __always_inline void __pv_wait_head(struct qspinlock *lock,
+					   struct mcs_spinlock *node) { }
 
 #define pv_enabled()		false
 
 #define pv_init_node		__pv_init_node
 #define pv_wait_node		__pv_wait_node
 #define pv_kick_node		__pv_kick_node
-#define pv_wait_head_or_lock	__pv_wait_head_or_lock
+#define pv_wait_head		__pv_wait_head
 
 #ifdef CONFIG_PARAVIRT_SPINLOCKS
 #define queued_spin_lock_slowpath	native_queued_spin_lock_slowpath
@@ -331,11 +319,7 @@ void queued_spin_lock_slowpath(struct qspinlock *lock, u32 val)
 		if (val == new)
 			new |= _Q_PENDING_VAL;
 
-		/*
-		 * Acquire semantic is required here as the function may
-		 * return immediately if the lock was free.
-		 */
-		old = atomic_cmpxchg_acquire(&lock->val, val, new);
+		old = atomic_cmpxchg(&lock->val, val, new);
 		if (old == val)
 			break;
 
@@ -358,7 +342,8 @@ void queued_spin_lock_slowpath(struct qspinlock *lock, u32 val)
 	 * sequentiality; this is because not all clear_pending_set_locked()
 	 * implementations imply full barriers.
 	 */
-	smp_cond_acquire(!(atomic_read(&lock->val) & _Q_LOCKED_MASK));
+	while ((val = smp_load_acquire(&lock->val.counter)) & _Q_LOCKED_MASK)
+		cpu_relax();
 
 	/*
 	 * take ownership and clear the pending bit.
@@ -397,7 +382,6 @@ queue:
 	 * p,*,* -> n,*,*
 	 */
 	old = xchg_tail(lock, tail);
-	next = NULL;
 
 	/*
 	 * if there was a previous node; link it and wait until reaching the
@@ -407,18 +391,8 @@ queue:
 		prev = decode_tail(old);
 		WRITE_ONCE(prev->next, node);
 
-		pv_wait_node(node, prev);
+		pv_wait_node(node);
 		arch_mcs_spin_lock_contended(&node->locked);
-
-		/*
-		 * While waiting for the MCS lock, the next pointer may have
-		 * been set by another lock waiter. We optimistically load
-		 * the next pointer & prefetch the cacheline for writing
-		 * to reduce latency in the upcoming MCS unlock operation.
-		 */
-		next = READ_ONCE(node->next);
-		if (next)
-			prefetchw(next);
 	}
 
 	/*
@@ -432,22 +406,11 @@ queue:
 	 * sequentiality; this is because the set_locked() function below
 	 * does not imply a full barrier.
 	 *
-	 * The PV pv_wait_head_or_lock function, if active, will acquire
-	 * the lock and return a non-zero value. So we have to skip the
-	 * smp_cond_acquire() call. As the next PV queue head hasn't been
-	 * designated yet, there is no way for the locked value to become
-	 * _Q_SLOW_VAL. So both the set_locked() and the
-	 * atomic_cmpxchg_relaxed() calls will be safe.
-	 *
-	 * If PV isn't active, 0 will be returned instead.
-	 *
 	 */
-	if ((val = pv_wait_head_or_lock(lock, node)))
-		goto locked;
+	pv_wait_head(lock, node);
+	while ((val = smp_load_acquire(&lock->val.counter)) & _Q_LOCKED_PENDING_MASK)
+		cpu_relax();
 
-	smp_cond_acquire(!((val = atomic_read(&lock->val)) & _Q_LOCKED_PENDING_MASK));
-
-locked:
 	/*
 	 * claim the lock:
 	 *
@@ -459,17 +422,11 @@ locked:
 	 * to grab the lock.
 	 */
 	for (;;) {
-		/* In the PV case we might already have _Q_LOCKED_VAL set */
-		if ((val & _Q_TAIL_MASK) != tail) {
+		if (val != tail) {
 			set_locked(lock);
 			break;
 		}
-		/*
-		 * The smp_cond_acquire() call above has provided the necessary
-		 * acquire semantics required for locking. At most two
-		 * iterations of this loop may be ran.
-		 */
-		old = atomic_cmpxchg_relaxed(&lock->val, val, _Q_LOCKED_VAL);
+		old = atomic_cmpxchg(&lock->val, val, _Q_LOCKED_VAL);
 		if (old == val)
 			goto release;	/* No contention */
 
@@ -477,12 +434,10 @@ locked:
 	}
 
 	/*
-	 * contended path; wait for next if not observed yet, release.
+	 * contended path; wait for next, release.
 	 */
-	if (!next) {
-		while (!(next = READ_ONCE(node->next)))
-			cpu_relax();
-	}
+	while (!(next = READ_ONCE(node->next)))
+		cpu_relax();
 
 	arch_mcs_spin_unlock_contended(&next->locked);
 	pv_kick_node(lock, next);
@@ -507,7 +462,7 @@ EXPORT_SYMBOL(queued_spin_lock_slowpath);
 #undef pv_init_node
 #undef pv_wait_node
 #undef pv_kick_node
-#undef pv_wait_head_or_lock
+#undef pv_wait_head
 
 #undef  queued_spin_lock_slowpath
 #define queued_spin_lock_slowpath	__pv_queued_spin_lock_slowpath

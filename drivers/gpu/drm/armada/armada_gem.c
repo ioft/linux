@@ -46,16 +46,14 @@ static size_t roundup_gem_size(size_t size)
 	return roundup(size, PAGE_SIZE);
 }
 
+/* dev->struct_mutex is held here */
 void armada_gem_free_object(struct drm_gem_object *obj)
 {
 	struct armada_gem_object *dobj = drm_to_armada_gem(obj);
-	struct armada_private *priv = obj->dev->dev_private;
 
 	DRM_DEBUG_DRIVER("release obj %p\n", dobj);
 
 	drm_gem_free_mmap_offset(&dobj->obj);
-
-	might_lock(&priv->linear_lock);
 
 	if (dobj->page) {
 		/* page backed memory */
@@ -63,9 +61,7 @@ void armada_gem_free_object(struct drm_gem_object *obj)
 		__free_pages(dobj->page, order);
 	} else if (dobj->linear) {
 		/* linear backed memory */
-		mutex_lock(&priv->linear_lock);
 		drm_mm_remove_node(dobj->linear);
-		mutex_unlock(&priv->linear_lock);
 		kfree(dobj->linear);
 		if (dobj->addr)
 			iounmap(dobj->addr);
@@ -148,10 +144,10 @@ armada_gem_linear_back(struct drm_device *dev, struct armada_gem_object *obj)
 		if (!node)
 			return -ENOSPC;
 
-		mutex_lock(&priv->linear_lock);
+		mutex_lock(&dev->struct_mutex);
 		ret = drm_mm_insert_node(&priv->linear, node, size, align,
 					 DRM_MM_SEARCH_DEFAULT);
-		mutex_unlock(&priv->linear_lock);
+		mutex_unlock(&dev->struct_mutex);
 		if (ret) {
 			kfree(node);
 			return ret;
@@ -162,9 +158,9 @@ armada_gem_linear_back(struct drm_device *dev, struct armada_gem_object *obj)
 		/* Ensure that the memory we're returning is cleared. */
 		ptr = ioremap_wc(obj->linear->start, size);
 		if (!ptr) {
-			mutex_lock(&priv->linear_lock);
+			mutex_lock(&dev->struct_mutex);
 			drm_mm_remove_node(obj->linear);
-			mutex_unlock(&priv->linear_lock);
+			mutex_unlock(&dev->struct_mutex);
 			kfree(obj->linear);
 			obj->linear = NULL;
 			return -ENOMEM;
@@ -278,16 +274,18 @@ int armada_gem_dumb_map_offset(struct drm_file *file, struct drm_device *dev,
 	struct armada_gem_object *obj;
 	int ret = 0;
 
+	mutex_lock(&dev->struct_mutex);
 	obj = armada_gem_object_lookup(dev, file, handle);
 	if (!obj) {
 		DRM_ERROR("failed to lookup gem object\n");
-		return -EINVAL;
+		ret = -EINVAL;
+		goto err_unlock;
 	}
 
 	/* Don't allow imported objects to be mapped */
 	if (obj->obj.import_attach) {
 		ret = -EINVAL;
-		goto err_unref;
+		goto err_unlock;
 	}
 
 	ret = drm_gem_create_mmap_offset(&obj->obj);
@@ -296,8 +294,9 @@ int armada_gem_dumb_map_offset(struct drm_file *file, struct drm_device *dev,
 		DRM_DEBUG_DRIVER("handle %#x offset %llx\n", handle, *offset);
 	}
 
- err_unref:
-	drm_gem_object_unreference_unlocked(&obj->obj);
+	drm_gem_object_unreference(&obj->obj);
+ err_unlock:
+	mutex_unlock(&dev->struct_mutex);
 
 	return ret;
 }
@@ -353,13 +352,13 @@ int armada_gem_mmap_ioctl(struct drm_device *dev, void *data,
 		return -ENOENT;
 
 	if (!dobj->obj.filp) {
-		drm_gem_object_unreference_unlocked(&dobj->obj);
+		drm_gem_object_unreference(&dobj->obj);
 		return -EINVAL;
 	}
 
 	addr = vm_mmap(dobj->obj.filp, 0, args->size, PROT_READ | PROT_WRITE,
 		       MAP_SHARED, args->offset);
-	drm_gem_object_unreference_unlocked(&dobj->obj);
+	drm_gem_object_unreference(&dobj->obj);
 	if (IS_ERR_VALUE(addr))
 		return addr;
 

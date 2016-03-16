@@ -244,7 +244,7 @@ struct inode *v9fs_alloc_inode(struct super_block *sb)
 		return NULL;
 #ifdef CONFIG_9P_FSCACHE
 	v9inode->fscache = NULL;
-	mutex_init(&v9inode->fscache_lock);
+	spin_lock_init(&v9inode->fscache_lock);
 #endif
 	v9inode->writeback_fid = NULL;
 	v9inode->cache_validity = 0;
@@ -1223,26 +1223,18 @@ ino_t v9fs_qid2ino(struct p9_qid *qid)
 }
 
 /**
- * v9fs_vfs_get_link - follow a symlink path
+ * v9fs_vfs_follow_link - follow a symlink path
  * @dentry: dentry for symlink
- * @inode: inode for symlink
- * @done: delayed call for when we are done with the return value
+ * @cookie: place to pass the data to put_link()
  */
 
-static const char *v9fs_vfs_get_link(struct dentry *dentry,
-				     struct inode *inode,
-				     struct delayed_call *done)
+static const char *v9fs_vfs_follow_link(struct dentry *dentry, void **cookie)
 {
-	struct v9fs_session_info *v9ses;
-	struct p9_fid *fid;
+	struct v9fs_session_info *v9ses = v9fs_dentry2v9ses(dentry);
+	struct p9_fid *fid = v9fs_fid_lookup(dentry);
 	struct p9_wstat *st;
 	char *res;
 
-	if (!dentry)
-		return ERR_PTR(-ECHILD);
-
-	v9ses = v9fs_dentry2v9ses(dentry);
-	fid = v9fs_fid_lookup(dentry);
 	p9_debug(P9_DEBUG_VFS, "%pd\n", dentry);
 
 	if (IS_ERR(fid))
@@ -1267,8 +1259,7 @@ static const char *v9fs_vfs_get_link(struct dentry *dentry,
 
 	p9stat_free(st);
 	kfree(st);
-	set_delayed_call(done, kfree_link, res);
-	return res;
+	return *cookie = res;
 }
 
 /**
@@ -1461,7 +1452,8 @@ static const struct inode_operations v9fs_file_inode_operations = {
 
 static const struct inode_operations v9fs_symlink_inode_operations = {
 	.readlink = generic_readlink,
-	.get_link = v9fs_vfs_get_link,
+	.follow_link = v9fs_vfs_follow_link,
+	.put_link = kfree_put_link,
 	.getattr = v9fs_vfs_getattr,
 	.setattr = v9fs_vfs_setattr,
 };

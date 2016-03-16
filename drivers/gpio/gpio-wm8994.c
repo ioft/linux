@@ -31,9 +31,14 @@ struct wm8994_gpio {
 	struct gpio_chip gpio_chip;
 };
 
+static inline struct wm8994_gpio *to_wm8994_gpio(struct gpio_chip *chip)
+{
+	return container_of(chip, struct wm8994_gpio, gpio_chip);
+}
+
 static int wm8994_gpio_request(struct gpio_chip *chip, unsigned offset)
 {
-	struct wm8994_gpio *wm8994_gpio = gpiochip_get_data(chip);
+	struct wm8994_gpio *wm8994_gpio = to_wm8994_gpio(chip);
 	struct wm8994 *wm8994 = wm8994_gpio->wm8994;
 
 	switch (wm8994->type) {
@@ -56,7 +61,7 @@ static int wm8994_gpio_request(struct gpio_chip *chip, unsigned offset)
 
 static int wm8994_gpio_direction_in(struct gpio_chip *chip, unsigned offset)
 {
-	struct wm8994_gpio *wm8994_gpio = gpiochip_get_data(chip);
+	struct wm8994_gpio *wm8994_gpio = to_wm8994_gpio(chip);
 	struct wm8994 *wm8994 = wm8994_gpio->wm8994;
 
 	return wm8994_set_bits(wm8994, WM8994_GPIO_1 + offset,
@@ -65,7 +70,7 @@ static int wm8994_gpio_direction_in(struct gpio_chip *chip, unsigned offset)
 
 static int wm8994_gpio_get(struct gpio_chip *chip, unsigned offset)
 {
-	struct wm8994_gpio *wm8994_gpio = gpiochip_get_data(chip);
+	struct wm8994_gpio *wm8994_gpio = to_wm8994_gpio(chip);
 	struct wm8994 *wm8994 = wm8994_gpio->wm8994;
 	int ret;
 
@@ -82,7 +87,7 @@ static int wm8994_gpio_get(struct gpio_chip *chip, unsigned offset)
 static int wm8994_gpio_direction_out(struct gpio_chip *chip,
 				     unsigned offset, int value)
 {
-	struct wm8994_gpio *wm8994_gpio = gpiochip_get_data(chip);
+	struct wm8994_gpio *wm8994_gpio = to_wm8994_gpio(chip);
 	struct wm8994 *wm8994 = wm8994_gpio->wm8994;
 
 	if (value)
@@ -94,7 +99,7 @@ static int wm8994_gpio_direction_out(struct gpio_chip *chip,
 
 static void wm8994_gpio_set(struct gpio_chip *chip, unsigned offset, int value)
 {
-	struct wm8994_gpio *wm8994_gpio = gpiochip_get_data(chip);
+	struct wm8994_gpio *wm8994_gpio = to_wm8994_gpio(chip);
 	struct wm8994 *wm8994 = wm8994_gpio->wm8994;
 
 	if (value)
@@ -105,7 +110,7 @@ static void wm8994_gpio_set(struct gpio_chip *chip, unsigned offset, int value)
 
 static int wm8994_gpio_to_irq(struct gpio_chip *chip, unsigned offset)
 {
-	struct wm8994_gpio *wm8994_gpio = gpiochip_get_data(chip);
+	struct wm8994_gpio *wm8994_gpio = to_wm8994_gpio(chip);
 	struct wm8994 *wm8994 = wm8994_gpio->wm8994;
 
 	return regmap_irq_get_virq(wm8994->irq_data, offset);
@@ -169,7 +174,7 @@ static const char *wm8994_gpio_fn(u16 fn)
 
 static void wm8994_gpio_dbg_show(struct seq_file *s, struct gpio_chip *chip)
 {
-	struct wm8994_gpio *wm8994_gpio = gpiochip_get_data(chip);
+	struct wm8994_gpio *wm8994_gpio = to_wm8994_gpio(chip);
 	struct wm8994 *wm8994 = wm8994_gpio->wm8994;
 	int i;
 
@@ -255,13 +260,13 @@ static int wm8994_gpio_probe(struct platform_device *pdev)
 	wm8994_gpio->wm8994 = wm8994;
 	wm8994_gpio->gpio_chip = template_chip;
 	wm8994_gpio->gpio_chip.ngpio = WM8994_GPIO_MAX;
-	wm8994_gpio->gpio_chip.parent = &pdev->dev;
+	wm8994_gpio->gpio_chip.dev = &pdev->dev;
 	if (pdata && pdata->gpio_base)
 		wm8994_gpio->gpio_chip.base = pdata->gpio_base;
 	else
 		wm8994_gpio->gpio_chip.base = -1;
 
-	ret = gpiochip_add_data(&wm8994_gpio->gpio_chip, wm8994_gpio);
+	ret = gpiochip_add(&wm8994_gpio->gpio_chip);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "Could not register gpiochip, %d\n",
 			ret);

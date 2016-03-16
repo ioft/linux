@@ -827,7 +827,6 @@ static const struct block_device_operations nbd_fops =
 {
 	.owner =	THIS_MODULE,
 	.ioctl =	nbd_ioctl,
-	.compat_ioctl =	nbd_ioctl,
 };
 
 #if IS_ENABLED(CONFIG_DEBUG_FS)

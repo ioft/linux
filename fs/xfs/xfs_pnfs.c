@@ -42,11 +42,11 @@ xfs_break_layouts(
 	while ((error = break_layout(inode, false) == -EWOULDBLOCK)) {
 		xfs_iunlock(ip, *iolock);
 		if (with_imutex && (*iolock & XFS_IOLOCK_EXCL))
-			inode_unlock(inode);
+			mutex_unlock(&inode->i_mutex);
 		error = break_layout(inode, true);
 		*iolock = XFS_IOLOCK_EXCL;
 		if (with_imutex)
-			inode_lock(inode);
+			mutex_lock(&inode->i_mutex);
 		xfs_ilock(ip, *iolock);
 	}
 

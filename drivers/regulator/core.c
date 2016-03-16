@@ -132,24 +132,24 @@ static bool have_full_constraints(void)
 	return has_full_constraints || of_have_populated_dt();
 }
 
-static inline struct regulator_dev *rdev_get_supply(struct regulator_dev *rdev)
-{
-	if (rdev && rdev->supply)
-		return rdev->supply->rdev;
-
-	return NULL;
-}
-
 /**
  * regulator_lock_supply - lock a regulator and its supplies
  * @rdev:         regulator source
  */
 static void regulator_lock_supply(struct regulator_dev *rdev)
 {
-	int i;
+	struct regulator *supply;
+	int i = 0;
 
-	for (i = 0; rdev; rdev = rdev_get_supply(rdev), i++)
-		mutex_lock_nested(&rdev->mutex, i);
+	while (1) {
+		mutex_lock_nested(&rdev->mutex, i++);
+		supply = rdev->supply;
+
+		if (!rdev->supply)
+			return;
+
+		rdev = supply->rdev;
+	}
 }
 
 /**
@@ -1057,18 +1057,18 @@ static int set_machine_constraints(struct regulator_dev *rdev,
 
 	ret = machine_constraints_voltage(rdev, rdev->constraints);
 	if (ret != 0)
-		return ret;
+		goto out;
 
 	ret = machine_constraints_current(rdev, rdev->constraints);
 	if (ret != 0)
-		return ret;
+		goto out;
 
 	if (rdev->constraints->ilim_uA && ops->set_input_current_limit) {
 		ret = ops->set_input_current_limit(rdev,
 						   rdev->constraints->ilim_uA);
 		if (ret < 0) {
 			rdev_err(rdev, "failed to set input limit\n");
-			return ret;
+			goto out;
 		}
 	}
 
@@ -1077,20 +1077,21 @@ static int set_machine_constraints(struct regulator_dev *rdev,
 		ret = suspend_prepare(rdev, rdev->constraints->initial_state);
 		if (ret < 0) {
 			rdev_err(rdev, "failed to set suspend state\n");
-			return ret;
+			goto out;
 		}
 	}
 
 	if (rdev->constraints->initial_mode) {
 		if (!ops->set_mode) {
 			rdev_err(rdev, "no set_mode operation\n");
-			return -EINVAL;
+			ret = -EINVAL;
+			goto out;
 		}
 
 		ret = ops->set_mode(rdev, rdev->constraints->initial_mode);
 		if (ret < 0) {
 			rdev_err(rdev, "failed to set initial mode: %d\n", ret);
-			return ret;
+			goto out;
 		}
 	}
 
@@ -1101,7 +1102,7 @@ static int set_machine_constraints(struct regulator_dev *rdev,
 		ret = _regulator_do_enable(rdev);
 		if (ret < 0 && ret != -EINVAL) {
 			rdev_err(rdev, "failed to enable\n");
-			return ret;
+			goto out;
 		}
 	}
 
@@ -1110,7 +1111,7 @@ static int set_machine_constraints(struct regulator_dev *rdev,
 		ret = ops->set_ramp_delay(rdev, rdev->constraints->ramp_delay);
 		if (ret < 0) {
 			rdev_err(rdev, "failed to set ramp_delay\n");
-			return ret;
+			goto out;
 		}
 	}
 
@@ -1118,7 +1119,7 @@ static int set_machine_constraints(struct regulator_dev *rdev,
 		ret = ops->set_pull_down(rdev);
 		if (ret < 0) {
 			rdev_err(rdev, "failed to set pull down\n");
-			return ret;
+			goto out;
 		}
 	}
 
@@ -1126,7 +1127,7 @@ static int set_machine_constraints(struct regulator_dev *rdev,
 		ret = ops->set_soft_start(rdev);
 		if (ret < 0) {
 			rdev_err(rdev, "failed to set soft start\n");
-			return ret;
+			goto out;
 		}
 	}
 
@@ -1135,34 +1136,16 @@ static int set_machine_constraints(struct regulator_dev *rdev,
 		ret = ops->set_over_current_protection(rdev);
 		if (ret < 0) {
 			rdev_err(rdev, "failed to set over current protection\n");
-			return ret;
-		}
-	}
-
-	if (rdev->constraints->active_discharge && ops->set_active_discharge) {
-		bool ad_state = (rdev->constraints->active_discharge ==
-			      REGULATOR_ACTIVE_DISCHARGE_ENABLE) ? true : false;
-
-		ret = ops->set_active_discharge(rdev, ad_state);
-		if (ret < 0) {
-			rdev_err(rdev, "failed to set active discharge\n");
-			return ret;
-		}
-	}
-
-	if (rdev->constraints->active_discharge && ops->set_active_discharge) {
-		bool ad_state = (rdev->constraints->active_discharge ==
-			      REGULATOR_ACTIVE_DISCHARGE_ENABLE) ? true : false;
-
-		ret = ops->set_active_discharge(rdev, ad_state);
-		if (ret < 0) {
-			rdev_err(rdev, "failed to set active discharge\n");
-			return ret;
+			goto out;
 		}
 	}
 
 	print_constraints(rdev);
 	return 0;
+out:
+	kfree(rdev->constraints);
+	rdev->constraints = NULL;
+	return ret;
 }
 
 /**
@@ -2385,6 +2368,7 @@ static void regulator_disable_work(struct work_struct *work)
 int regulator_disable_deferred(struct regulator *regulator, int ms)
 {
 	struct regulator_dev *rdev = regulator->rdev;
+	int ret;
 
 	if (regulator->always_on)
 		return 0;
@@ -2396,9 +2380,13 @@ int regulator_disable_deferred(struct regulator *regulator, int ms)
 	rdev->deferred_disables++;
 	mutex_unlock(&rdev->mutex);
 
-	queue_delayed_work(system_power_efficient_wq, &rdev->disable_work,
-			   msecs_to_jiffies(ms));
-	return 0;
+	ret = queue_delayed_work(system_power_efficient_wq,
+				 &rdev->disable_work,
+				 msecs_to_jiffies(ms));
+	if (ret < 0)
+		return ret;
+	else
+		return 0;
 }
 EXPORT_SYMBOL_GPL(regulator_disable_deferred);
 
@@ -3463,10 +3451,8 @@ int regulator_bulk_get(struct device *dev, int num_consumers,
 		consumers[i].consumer = NULL;
 
 	for (i = 0; i < num_consumers; i++) {
-		consumers[i].consumer = _regulator_get(dev,
-						       consumers[i].supply,
-						       false,
-						       !consumers[i].optional);
+		consumers[i].consumer = regulator_get(dev,
+						      consumers[i].supply);
 		if (IS_ERR(consumers[i].consumer)) {
 			ret = PTR_ERR(consumers[i].consumer);
 			dev_err(dev, "Failed to get supply '%s': %d\n",
@@ -3722,7 +3708,7 @@ static umode_t regulator_attr_is_visible(struct kobject *kobj,
 					 struct attribute *attr, int idx)
 {
 	struct device *dev = kobj_to_dev(kobj);
-	struct regulator_dev *rdev = dev_to_rdev(dev);
+	struct regulator_dev *rdev = container_of(dev, struct regulator_dev, dev);
 	const struct regulator_ops *ops = rdev->desc->ops;
 	umode_t mode = attr->mode;
 
@@ -3935,16 +3921,6 @@ regulator_register(const struct regulator_desc *regulator_desc,
 			goto clean;
 	}
 
-	if ((config->ena_gpio || config->ena_gpio_initialized) &&
-	    gpio_is_valid(config->ena_gpio)) {
-		ret = regulator_ena_gpio_request(rdev, config);
-		if (ret != 0) {
-			rdev_err(rdev, "Failed to request enable GPIO%d: %d\n",
-				 config->ena_gpio, ret);
-			goto clean;
-		}
-	}
-
 	/* register with sysfs */
 	rdev->dev.class = &regulator_class;
 	rdev->dev.parent = dev;
@@ -3953,10 +3929,20 @@ regulator_register(const struct regulator_desc *regulator_desc,
 	ret = device_register(&rdev->dev);
 	if (ret != 0) {
 		put_device(&rdev->dev);
-		goto wash;
+		goto clean;
 	}
 
 	dev_set_drvdata(&rdev->dev, rdev);
+
+	if ((config->ena_gpio || config->ena_gpio_initialized) &&
+	    gpio_is_valid(config->ena_gpio)) {
+		ret = regulator_ena_gpio_request(rdev, config);
+		if (ret != 0) {
+			rdev_err(rdev, "Failed to request enable GPIO%d: %d\n",
+				 config->ena_gpio, ret);
+			goto wash;
+		}
+	}
 
 	/* set regulator constraints */
 	if (init_data)
@@ -3996,13 +3982,13 @@ unset_supplies:
 
 scrub:
 	regulator_ena_gpio_free(rdev);
+	kfree(rdev->constraints);
+wash:
 	device_unregister(&rdev->dev);
 	/* device core frees rdev */
 	rdev = ERR_PTR(ret);
 	goto out;
 
-wash:
-	regulator_ena_gpio_free(rdev);
 clean:
 	kfree(rdev);
 	rdev = ERR_PTR(ret);

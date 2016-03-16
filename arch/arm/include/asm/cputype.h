@@ -228,26 +228,10 @@ static inline int cpu_is_xsc3(void)
 }
 #endif
 
-#if !defined(CONFIG_CPU_XSCALE) && !defined(CONFIG_CPU_XSC3) && \
-    !defined(CONFIG_CPU_MOHAWK)
-#define	cpu_is_xscale_family() 0
+#if !defined(CONFIG_CPU_XSCALE) && !defined(CONFIG_CPU_XSC3)
+#define	cpu_is_xscale()	0
 #else
-static inline int cpu_is_xscale_family(void)
-{
-	unsigned int id;
-	id = read_cpuid_id() & 0xffffe000;
-
-	switch (id) {
-	case 0x69052000: /* Intel XScale 1 */
-	case 0x69054000: /* Intel XScale 2 */
-	case 0x69056000: /* Intel XScale 3 */
-	case 0x56056000: /* Marvell XScale 3 */
-	case 0x56158000: /* Marvell Mohawk */
-		return 1;
-	}
-
-	return 0;
-}
+#define	cpu_is_xscale()	1
 #endif
 
 /*

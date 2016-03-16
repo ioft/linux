@@ -2,28 +2,18 @@ Qualcomm adreno/snapdragon display controller
 
 Required properties:
 - compatible:
-  * "qcom,mdp4" - mdp4
-  * "qcom,mdp5" - mdp5
+  * "qcom,mdp" - mdp4
 - reg: Physical base address and length of the controller's registers.
 - interrupts: The interrupt signal from the display controller.
 - connectors: array of phandles for output device(s)
 - clocks: device clocks
   See ../clocks/clock-bindings.txt for details.
-- clock-names: the following clocks are required.
-  For MDP4:
-   * "core_clk"
-   * "iface_clk"
-   * "lut_clk"
-   * "src_clk"
-   * "hdmi_clk"
-   * "mdp_clk"
-  For MDP5:
-   * "bus_clk"
-   * "iface_clk"
-   * "core_clk_src"
-   * "core_clk"
-   * "lut_clk" (some MDP5 versions may not need this)
-   * "vsync_clk"
+- clock-names: the following clocks are required:
+  * "core_clk"
+  * "iface_clk"
+  * "src_clk"
+  * "hdmi_clk"
+  * "mpd_clk"
 
 Optional properties:
 - gpus: phandle for gpu device
@@ -36,7 +26,7 @@ Example:
 	...
 
 	mdp: qcom,mdp@5100000 {
-		compatible = "qcom,mdp4";
+		compatible = "qcom,mdp";
 		reg = <0x05100000 0xf0000>;
 		interrupts = <GIC_SPI 75 0>;
 		connectors = <&hdmi>;

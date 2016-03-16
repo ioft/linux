@@ -259,14 +259,10 @@ struct aste {
 
 int ipte_lock_held(struct kvm_vcpu *vcpu)
 {
-	if (vcpu->arch.sie_block->eca & 1) {
-		int rc;
+	union ipte_control *ic = &vcpu->kvm->arch.sca->ipte_control;
 
-		read_lock(&vcpu->kvm->arch.sca_lock);
-		rc = kvm_s390_get_ipte_control(vcpu->kvm)->kh != 0;
-		read_unlock(&vcpu->kvm->arch.sca_lock);
-		return rc;
-	}
+	if (vcpu->arch.sie_block->eca & 1)
+		return ic->kh != 0;
 	return vcpu->kvm->arch.ipte_lock_count != 0;
 }
 
@@ -278,20 +274,16 @@ static void ipte_lock_simple(struct kvm_vcpu *vcpu)
 	vcpu->kvm->arch.ipte_lock_count++;
 	if (vcpu->kvm->arch.ipte_lock_count > 1)
 		goto out;
-retry:
-	read_lock(&vcpu->kvm->arch.sca_lock);
-	ic = kvm_s390_get_ipte_control(vcpu->kvm);
+	ic = &vcpu->kvm->arch.sca->ipte_control;
 	do {
 		old = READ_ONCE(*ic);
-		if (old.k) {
-			read_unlock(&vcpu->kvm->arch.sca_lock);
+		while (old.k) {
 			cond_resched();
-			goto retry;
+			old = READ_ONCE(*ic);
 		}
 		new = old;
 		new.k = 1;
 	} while (cmpxchg(&ic->val, old.val, new.val) != old.val);
-	read_unlock(&vcpu->kvm->arch.sca_lock);
 out:
 	mutex_unlock(&vcpu->kvm->arch.ipte_mutex);
 }
@@ -304,14 +296,12 @@ static void ipte_unlock_simple(struct kvm_vcpu *vcpu)
 	vcpu->kvm->arch.ipte_lock_count--;
 	if (vcpu->kvm->arch.ipte_lock_count)
 		goto out;
-	read_lock(&vcpu->kvm->arch.sca_lock);
-	ic = kvm_s390_get_ipte_control(vcpu->kvm);
+	ic = &vcpu->kvm->arch.sca->ipte_control;
 	do {
 		old = READ_ONCE(*ic);
 		new = old;
 		new.k = 0;
 	} while (cmpxchg(&ic->val, old.val, new.val) != old.val);
-	read_unlock(&vcpu->kvm->arch.sca_lock);
 	wake_up(&vcpu->kvm->arch.ipte_wq);
 out:
 	mutex_unlock(&vcpu->kvm->arch.ipte_mutex);
@@ -321,29 +311,24 @@ static void ipte_lock_siif(struct kvm_vcpu *vcpu)
 {
 	union ipte_control old, new, *ic;
 
-retry:
-	read_lock(&vcpu->kvm->arch.sca_lock);
-	ic = kvm_s390_get_ipte_control(vcpu->kvm);
+	ic = &vcpu->kvm->arch.sca->ipte_control;
 	do {
 		old = READ_ONCE(*ic);
-		if (old.kg) {
-			read_unlock(&vcpu->kvm->arch.sca_lock);
+		while (old.kg) {
 			cond_resched();
-			goto retry;
+			old = READ_ONCE(*ic);
 		}
 		new = old;
 		new.k = 1;
 		new.kh++;
 	} while (cmpxchg(&ic->val, old.val, new.val) != old.val);
-	read_unlock(&vcpu->kvm->arch.sca_lock);
 }
 
 static void ipte_unlock_siif(struct kvm_vcpu *vcpu)
 {
 	union ipte_control old, new, *ic;
 
-	read_lock(&vcpu->kvm->arch.sca_lock);
-	ic = kvm_s390_get_ipte_control(vcpu->kvm);
+	ic = &vcpu->kvm->arch.sca->ipte_control;
 	do {
 		old = READ_ONCE(*ic);
 		new = old;
@@ -351,7 +336,6 @@ static void ipte_unlock_siif(struct kvm_vcpu *vcpu)
 		if (!new.kh)
 			new.k = 0;
 	} while (cmpxchg(&ic->val, old.val, new.val) != old.val);
-	read_unlock(&vcpu->kvm->arch.sca_lock);
 	if (!new.kh)
 		wake_up(&vcpu->kvm->arch.ipte_wq);
 }
@@ -373,7 +357,7 @@ void ipte_unlock(struct kvm_vcpu *vcpu)
 }
 
 static int ar_translation(struct kvm_vcpu *vcpu, union asce *asce, ar_t ar,
-			  enum gacc_mode mode)
+			  int write)
 {
 	union alet alet;
 	struct ale ale;
@@ -454,7 +438,7 @@ static int ar_translation(struct kvm_vcpu *vcpu, union asce *asce, ar_t ar,
 		}
 	}
 
-	if (ale.fo == 1 && mode == GACC_STORE)
+	if (ale.fo == 1 && write)
 		return PGM_PROTECTION;
 
 	asce->val = aste.asce;
@@ -477,28 +461,25 @@ enum {
 };
 
 static int get_vcpu_asce(struct kvm_vcpu *vcpu, union asce *asce,
-			 ar_t ar, enum gacc_mode mode)
+			 ar_t ar, int write)
 {
 	int rc;
-	struct psw_bits psw = psw_bits(vcpu->arch.sie_block->gpsw);
+	psw_t *psw = &vcpu->arch.sie_block->gpsw;
 	struct kvm_s390_pgm_info *pgm = &vcpu->arch.pgm;
 	struct trans_exc_code_bits *tec_bits;
 
 	memset(pgm, 0, sizeof(*pgm));
 	tec_bits = (struct trans_exc_code_bits *)&pgm->trans_exc_code;
-	tec_bits->fsi = mode == GACC_STORE ? FSI_STORE : FSI_FETCH;
-	tec_bits->as = psw.as;
+	tec_bits->fsi = write ? FSI_STORE : FSI_FETCH;
+	tec_bits->as = psw_bits(*psw).as;
 
-	if (!psw.t) {
+	if (!psw_bits(*psw).t) {
 		asce->val = 0;
 		asce->r = 1;
 		return 0;
 	}
 
-	if (mode == GACC_IFETCH)
-		psw.as = psw.as == PSW_AS_HOME ? PSW_AS_HOME : PSW_AS_PRIMARY;
-
-	switch (psw.as) {
+	switch (psw_bits(vcpu->arch.sie_block->gpsw).as) {
 	case PSW_AS_PRIMARY:
 		asce->val = vcpu->arch.sie_block->gcr[1];
 		return 0;
@@ -509,7 +490,7 @@ static int get_vcpu_asce(struct kvm_vcpu *vcpu, union asce *asce,
 		asce->val = vcpu->arch.sie_block->gcr[13];
 		return 0;
 	case PSW_AS_ACCREG:
-		rc = ar_translation(vcpu, asce, ar, mode);
+		rc = ar_translation(vcpu, asce, ar, write);
 		switch (rc) {
 		case PGM_ALEN_TRANSLATION:
 		case PGM_ALE_SEQUENCE:
@@ -541,7 +522,7 @@ static int deref_table(struct kvm *kvm, unsigned long gpa, unsigned long *val)
  * @gva: guest virtual address
  * @gpa: points to where guest physical (absolute) address should be stored
  * @asce: effective asce
- * @mode: indicates the access mode to be used
+ * @write: indicates if access is a write access
  *
  * Translate a guest virtual address into a guest absolute address by means
  * of dynamic address translation as specified by the architecture.
@@ -557,7 +538,7 @@ static int deref_table(struct kvm *kvm, unsigned long gpa, unsigned long *val)
  */
 static unsigned long guest_translate(struct kvm_vcpu *vcpu, unsigned long gva,
 				     unsigned long *gpa, const union asce asce,
-				     enum gacc_mode mode)
+				     int write)
 {
 	union vaddress vaddr = {.addr = gva};
 	union raddress raddr = {.addr = gva};
@@ -702,7 +683,7 @@ static unsigned long guest_translate(struct kvm_vcpu *vcpu, unsigned long gva,
 real_address:
 	raddr.addr = kvm_s390_real_to_abs(vcpu, raddr.addr);
 absolute_address:
-	if (mode == GACC_STORE && dat_protection)
+	if (write && dat_protection)
 		return PGM_PROTECTION;
 	if (kvm_is_error_gpa(vcpu->kvm, raddr.addr))
 		return PGM_ADDRESSING;
@@ -731,7 +712,7 @@ static int low_address_protection_enabled(struct kvm_vcpu *vcpu,
 
 static int guest_page_range(struct kvm_vcpu *vcpu, unsigned long ga,
 			    unsigned long *pages, unsigned long nr_pages,
-			    const union asce asce, enum gacc_mode mode)
+			    const union asce asce, int write)
 {
 	struct kvm_s390_pgm_info *pgm = &vcpu->arch.pgm;
 	psw_t *psw = &vcpu->arch.sie_block->gpsw;
@@ -743,13 +724,13 @@ static int guest_page_range(struct kvm_vcpu *vcpu, unsigned long ga,
 	while (nr_pages) {
 		ga = kvm_s390_logical_to_effective(vcpu, ga);
 		tec_bits->addr = ga >> PAGE_SHIFT;
-		if (mode == GACC_STORE && lap_enabled && is_low_address(ga)) {
+		if (write && lap_enabled && is_low_address(ga)) {
 			pgm->code = PGM_PROTECTION;
 			return pgm->code;
 		}
 		ga &= PAGE_MASK;
 		if (psw_bits(*psw).t) {
-			rc = guest_translate(vcpu, ga, pages, asce, mode);
+			rc = guest_translate(vcpu, ga, pages, asce, write);
 			if (rc < 0)
 				return rc;
 			if (rc == PGM_PROTECTION)
@@ -771,7 +752,7 @@ static int guest_page_range(struct kvm_vcpu *vcpu, unsigned long ga,
 }
 
 int access_guest(struct kvm_vcpu *vcpu, unsigned long ga, ar_t ar, void *data,
-		 unsigned long len, enum gacc_mode mode)
+		 unsigned long len, int write)
 {
 	psw_t *psw = &vcpu->arch.sie_block->gpsw;
 	unsigned long _len, nr_pages, gpa, idx;
@@ -783,7 +764,7 @@ int access_guest(struct kvm_vcpu *vcpu, unsigned long ga, ar_t ar, void *data,
 
 	if (!len)
 		return 0;
-	rc = get_vcpu_asce(vcpu, &asce, ar, mode);
+	rc = get_vcpu_asce(vcpu, &asce, ar, write);
 	if (rc)
 		return rc;
 	nr_pages = (((ga & ~PAGE_MASK) + len - 1) >> PAGE_SHIFT) + 1;
@@ -795,11 +776,11 @@ int access_guest(struct kvm_vcpu *vcpu, unsigned long ga, ar_t ar, void *data,
 	need_ipte_lock = psw_bits(*psw).t && !asce.r;
 	if (need_ipte_lock)
 		ipte_lock(vcpu);
-	rc = guest_page_range(vcpu, ga, pages, nr_pages, asce, mode);
+	rc = guest_page_range(vcpu, ga, pages, nr_pages, asce, write);
 	for (idx = 0; idx < nr_pages && !rc; idx++) {
 		gpa = *(pages + idx) + (ga & ~PAGE_MASK);
 		_len = min(PAGE_SIZE - (gpa & ~PAGE_MASK), len);
-		if (mode == GACC_STORE)
+		if (write)
 			rc = kvm_write_guest(vcpu->kvm, gpa, data, _len);
 		else
 			rc = kvm_read_guest(vcpu->kvm, gpa, data, _len);
@@ -815,7 +796,7 @@ int access_guest(struct kvm_vcpu *vcpu, unsigned long ga, ar_t ar, void *data,
 }
 
 int access_guest_real(struct kvm_vcpu *vcpu, unsigned long gra,
-		      void *data, unsigned long len, enum gacc_mode mode)
+		      void *data, unsigned long len, int write)
 {
 	unsigned long _len, gpa;
 	int rc = 0;
@@ -823,7 +804,7 @@ int access_guest_real(struct kvm_vcpu *vcpu, unsigned long gra,
 	while (len && !rc) {
 		gpa = kvm_s390_real_to_abs(vcpu, gra);
 		_len = min(PAGE_SIZE - (gpa & ~PAGE_MASK), len);
-		if (mode)
+		if (write)
 			rc = write_guest_abs(vcpu, gpa, data, _len);
 		else
 			rc = read_guest_abs(vcpu, gpa, data, _len);
@@ -844,7 +825,7 @@ int access_guest_real(struct kvm_vcpu *vcpu, unsigned long gra,
  * has to take care of this.
  */
 int guest_translate_address(struct kvm_vcpu *vcpu, unsigned long gva, ar_t ar,
-			    unsigned long *gpa, enum gacc_mode mode)
+			    unsigned long *gpa, int write)
 {
 	struct kvm_s390_pgm_info *pgm = &vcpu->arch.pgm;
 	psw_t *psw = &vcpu->arch.sie_block->gpsw;
@@ -854,19 +835,19 @@ int guest_translate_address(struct kvm_vcpu *vcpu, unsigned long gva, ar_t ar,
 
 	gva = kvm_s390_logical_to_effective(vcpu, gva);
 	tec = (struct trans_exc_code_bits *)&pgm->trans_exc_code;
-	rc = get_vcpu_asce(vcpu, &asce, ar, mode);
+	rc = get_vcpu_asce(vcpu, &asce, ar, write);
 	tec->addr = gva >> PAGE_SHIFT;
 	if (rc)
 		return rc;
 	if (is_low_address(gva) && low_address_protection_enabled(vcpu, asce)) {
-		if (mode == GACC_STORE) {
+		if (write) {
 			rc = pgm->code = PGM_PROTECTION;
 			return rc;
 		}
 	}
 
 	if (psw_bits(*psw).t && !asce.r) {	/* Use DAT? */
-		rc = guest_translate(vcpu, gva, gpa, asce, mode);
+		rc = guest_translate(vcpu, gva, gpa, asce, write);
 		if (rc > 0) {
 			if (rc == PGM_PROTECTION)
 				tec->b61 = 1;
@@ -886,7 +867,7 @@ int guest_translate_address(struct kvm_vcpu *vcpu, unsigned long gva, ar_t ar,
  * check_gva_range - test a range of guest virtual addresses for accessibility
  */
 int check_gva_range(struct kvm_vcpu *vcpu, unsigned long gva, ar_t ar,
-		    unsigned long length, enum gacc_mode mode)
+		    unsigned long length, int is_write)
 {
 	unsigned long gpa;
 	unsigned long currlen;
@@ -895,7 +876,7 @@ int check_gva_range(struct kvm_vcpu *vcpu, unsigned long gva, ar_t ar,
 	ipte_lock(vcpu);
 	while (length > 0 && !rc) {
 		currlen = min(length, PAGE_SIZE - (gva % PAGE_SIZE));
-		rc = guest_translate_address(vcpu, gva, ar, &gpa, mode);
+		rc = guest_translate_address(vcpu, gva, ar, &gpa, is_write);
 		gva += currlen;
 		length -= currlen;
 	}

@@ -27,7 +27,7 @@
  * Copyright (c) 2002, 2010, Oracle and/or its affiliates. All rights reserved.
  * Use is subject to license terms.
  *
- * Copyright (c) 2011, 2015, Intel Corporation.
+ * Copyright (c) 2011, 2012, Intel Corporation.
  */
 /*
  * This file is part of Lustre, http://www.lustre.org/
@@ -126,7 +126,9 @@ struct inode *ll_iget(struct super_block *sb, ino_t hash,
 				rc = cl_file_inode_init(inode, md);
 			}
 			if (rc != 0) {
-				iget_failed(inode);
+				make_bad_inode(inode);
+				unlock_new_inode(inode);
+				iput(inode);
 				inode = ERR_PTR(rc);
 			} else
 				unlock_new_inode(inode);
@@ -554,6 +556,7 @@ static struct dentry *ll_lookup_it(struct inode *parent, struct dentry *dentry,
 		retval = NULL;
 	else
 		retval = dentry;
+	goto out;
  out:
 	if (req)
 		ptlrpc_req_finished(req);

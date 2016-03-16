@@ -930,8 +930,6 @@ irqreturn_t azx_interrupt(int irq, void *dev_id)
 	struct azx *chip = dev_id;
 	struct hdac_bus *bus = azx_bus(chip);
 	u32 status;
-	bool active, handled = false;
-	int repeat = 0; /* count for avoiding endless loop */
 
 #ifdef CONFIG_PM
 	if (azx_has_pm_runtime(chip))
@@ -941,36 +939,33 @@ irqreturn_t azx_interrupt(int irq, void *dev_id)
 
 	spin_lock(&bus->reg_lock);
 
-	if (chip->disabled)
-		goto unlock;
+	if (chip->disabled) {
+		spin_unlock(&bus->reg_lock);
+		return IRQ_NONE;
+	}
 
-	do {
-		status = azx_readl(chip, INTSTS);
-		if (status == 0 || status == 0xffffffff)
-			break;
+	status = azx_readl(chip, INTSTS);
+	if (status == 0 || status == 0xffffffff) {
+		spin_unlock(&bus->reg_lock);
+		return IRQ_NONE;
+	}
 
-		handled = true;
-		active = false;
-		if (snd_hdac_bus_handle_stream_irq(bus, status, stream_update))
-			active = true;
+	snd_hdac_bus_handle_stream_irq(bus, status, stream_update);
 
-		/* clear rirb int */
-		status = azx_readb(chip, RIRBSTS);
-		if (status & RIRB_INT_MASK) {
-			active = true;
-			if (status & RIRB_INT_RESPONSE) {
-				if (chip->driver_caps & AZX_DCAPS_CTX_WORKAROUND)
-					udelay(80);
-				snd_hdac_bus_update_rirb(bus);
-			}
-			azx_writeb(chip, RIRBSTS, RIRB_INT_MASK);
+	/* clear rirb int */
+	status = azx_readb(chip, RIRBSTS);
+	if (status & RIRB_INT_MASK) {
+		if (status & RIRB_INT_RESPONSE) {
+			if (chip->driver_caps & AZX_DCAPS_RIRB_PRE_DELAY)
+				udelay(80);
+			snd_hdac_bus_update_rirb(bus);
 		}
-	} while (active && ++repeat < 10);
+		azx_writeb(chip, RIRBSTS, RIRB_INT_MASK);
+	}
 
- unlock:
 	spin_unlock(&bus->reg_lock);
 
-	return IRQ_RETVAL(handled);
+	return IRQ_HANDLED;
 }
 EXPORT_SYMBOL_GPL(azx_interrupt);
 
@@ -1055,9 +1050,15 @@ int azx_bus_init(struct azx *chip, const char *model,
 	if (chip->get_position[0] != azx_get_pos_lpib ||
 	    chip->get_position[1] != azx_get_pos_lpib)
 		bus->core.use_posbuf = true;
-	bus->core.bdl_pos_adj = chip->bdl_pos_adj;
+	if (chip->bdl_pos_adj)
+		bus->core.bdl_pos_adj = chip->bdl_pos_adj[chip->dev_index];
 	if (chip->driver_caps & AZX_DCAPS_CORBRP_SELF_CLEAR)
 		bus->core.corbrp_self_clear = true;
+
+	if (chip->driver_caps & AZX_DCAPS_RIRB_DELAY) {
+		dev_dbg(chip->card->dev, "Enable delay in RIRB handling\n");
+		bus->needs_damn_long_delay = 1;
+	}
 
 	if (chip->driver_caps & AZX_DCAPS_4K_BDLE_BOUNDARY)
 		bus->core.align_bdle_4k = true;

@@ -117,7 +117,7 @@ static void init_amd_k6(struct cpuinfo_x86 *c)
 		void (*f_vide)(void);
 		u64 d, d2;
 
-		pr_info("AMD K6 stepping B detected - ");
+		printk(KERN_INFO "AMD K6 stepping B detected - ");
 
 		/*
 		 * It looks like AMD fixed the 2.6.2 bug and improved indirect
@@ -133,9 +133,10 @@ static void init_amd_k6(struct cpuinfo_x86 *c)
 		d = d2-d;
 
 		if (d > 20*K6_BUG_LOOP)
-			pr_cont("system stability may be impaired when more than 32 MB are used.\n");
+			printk(KERN_CONT
+				"system stability may be impaired when more than 32 MB are used.\n");
 		else
-			pr_cont("probably OK (after B9730xxxx).\n");
+			printk(KERN_CONT "probably OK (after B9730xxxx).\n");
 	}
 
 	/* K6 with old style WHCR */
@@ -153,7 +154,7 @@ static void init_amd_k6(struct cpuinfo_x86 *c)
 			wbinvd();
 			wrmsr(MSR_K6_WHCR, l, h);
 			local_irq_restore(flags);
-			pr_info("Enabling old style K6 write allocation for %d Mb\n",
+			printk(KERN_INFO "Enabling old style K6 write allocation for %d Mb\n",
 				mbytes);
 		}
 		return;
@@ -174,7 +175,7 @@ static void init_amd_k6(struct cpuinfo_x86 *c)
 			wbinvd();
 			wrmsr(MSR_K6_WHCR, l, h);
 			local_irq_restore(flags);
-			pr_info("Enabling new style K6 write allocation for %d Mb\n",
+			printk(KERN_INFO "Enabling new style K6 write allocation for %d Mb\n",
 				mbytes);
 		}
 
@@ -201,7 +202,7 @@ static void init_amd_k7(struct cpuinfo_x86 *c)
 	 */
 	if (c->x86_model >= 6 && c->x86_model <= 10) {
 		if (!cpu_has(c, X86_FEATURE_XMM)) {
-			pr_info("Enabling disabled K7/SSE Support.\n");
+			printk(KERN_INFO "Enabling disabled K7/SSE Support.\n");
 			msr_clear_bit(MSR_K7_HWCR, 15);
 			set_cpu_cap(c, X86_FEATURE_XMM);
 		}
@@ -215,8 +216,9 @@ static void init_amd_k7(struct cpuinfo_x86 *c)
 	if ((c->x86_model == 8 && c->x86_mask >= 1) || (c->x86_model > 8)) {
 		rdmsr(MSR_K7_CLK_CTL, l, h);
 		if ((l & 0xfff00000) != 0x20000000) {
-			pr_info("CPU: CLK_CTL MSR was %x. Reprogramming to %x\n",
-				l, ((l & 0x000fffff)|0x20000000));
+			printk(KERN_INFO
+			    "CPU: CLK_CTL MSR was %x. Reprogramming to %x\n",
+					l, ((l & 0x000fffff)|0x20000000));
 			wrmsr(MSR_K7_CLK_CTL, (l & 0x000fffff)|0x20000000, h);
 		}
 	}
@@ -302,7 +304,7 @@ static void amd_get_topology(struct cpuinfo_x86 *c)
 	int cpu = smp_processor_id();
 
 	/* get information required for multi-node processors */
-	if (boot_cpu_has(X86_FEATURE_TOPOEXT)) {
+	if (cpu_has_topoext) {
 		u32 eax, ebx, ecx, edx;
 
 		cpuid(0x8000001e, &eax, &ebx, &ecx, &edx);
@@ -432,7 +434,8 @@ static void srat_detect_node(struct cpuinfo_x86 *c)
 		 */
 		int ht_nodeid = c->initial_apicid;
 
-		if (__apicid_to_node[ht_nodeid] != NUMA_NO_NODE)
+		if (ht_nodeid >= 0 &&
+		    __apicid_to_node[ht_nodeid] != NUMA_NO_NODE)
 			node = __apicid_to_node[ht_nodeid];
 		/* Pick a nearby node */
 		if (!node_online(node))
@@ -483,7 +486,7 @@ static void bsp_init_amd(struct cpuinfo_x86 *c)
 		if (!rdmsrl_safe(MSR_K8_TSEG_ADDR, &tseg)) {
 			unsigned long pfn = tseg >> PAGE_SHIFT;
 
-			pr_debug("tseg: %010llx\n", tseg);
+			printk(KERN_DEBUG "tseg: %010llx\n", tseg);
 			if (pfn_range_is_mapped(pfn, pfn + 1))
 				set_memory_4k((unsigned long)__va(tseg), 1);
 		}
@@ -498,7 +501,8 @@ static void bsp_init_amd(struct cpuinfo_x86 *c)
 
 			rdmsrl(MSR_K7_HWCR, val);
 			if (!(val & BIT(24)))
-				pr_warn(FW_BUG "TSC doesn't count with P0 frequency!\n");
+				printk(KERN_WARNING FW_BUG "TSC doesn't count "
+					"with P0 frequency!\n");
 		}
 	}
 
@@ -674,9 +678,9 @@ static void init_amd_bd(struct cpuinfo_x86 *c)
 	 * Disable it on the affected CPUs.
 	 */
 	if ((c->x86_model >= 0x02) && (c->x86_model < 0x20)) {
-		if (!rdmsrl_safe(MSR_F15H_IC_CFG, &value) && !(value & 0x1E)) {
+		if (!rdmsrl_safe(0xc0011021, &value) && !(value & 0x1E)) {
 			value |= 0x1E;
-			wrmsrl_safe(MSR_F15H_IC_CFG, value);
+			wrmsrl_safe(0xc0011021, value);
 		}
 	}
 }
@@ -918,7 +922,7 @@ static bool cpu_has_amd_erratum(struct cpuinfo_x86 *cpu, const int *erratum)
 
 void set_dr_addr_mask(unsigned long mask, int dr)
 {
-	if (!boot_cpu_has(X86_FEATURE_BPEXT))
+	if (!cpu_has_bpext)
 		return;
 
 	switch (dr) {

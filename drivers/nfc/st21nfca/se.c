@@ -312,8 +312,7 @@ int st21nfca_connectivity_event_received(struct nfc_hci_dev *hdev, u8 host,
 
 	switch (event) {
 	case ST21NFCA_EVT_CONNECTIVITY:
-		r = nfc_se_connectivity(hdev->ndev, host);
-	break;
+		break;
 	case ST21NFCA_EVT_TRANSACTION:
 		/*
 		 * According to specification etsi 102 622
@@ -343,7 +342,7 @@ int st21nfca_connectivity_event_received(struct nfc_hci_dev *hdev, u8 host,
 		       transaction->aid_len + 4, transaction->params_len);
 
 		r = nfc_se_transaction(hdev->ndev, host, transaction);
-	break;
+		break;
 	default:
 		nfc_err(&hdev->ndev->dev, "Unexpected event on connectivity gate\n");
 		return 1;

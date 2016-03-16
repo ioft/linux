@@ -33,7 +33,7 @@ static loff_t hpfs_dir_lseek(struct file *filp, loff_t off, int whence)
 	if (whence == SEEK_DATA || whence == SEEK_HOLE)
 		return -EINVAL;
 
-	inode_lock(i);
+	mutex_lock(&i->i_mutex);
 	hpfs_lock(s);
 
 	/*pr_info("dir lseek\n");*/
@@ -48,12 +48,12 @@ static loff_t hpfs_dir_lseek(struct file *filp, loff_t off, int whence)
 ok:
 	filp->f_pos = new_off;
 	hpfs_unlock(s);
-	inode_unlock(i);
+	mutex_unlock(&i->i_mutex);
 	return new_off;
 fail:
 	/*pr_warn("illegal lseek: %016llx\n", new_off);*/
 	hpfs_unlock(s);
-	inode_unlock(i);
+	mutex_unlock(&i->i_mutex);
 	return -ESPIPE;
 }
 

@@ -77,7 +77,7 @@ static umode_t smbios_instance_string_exist(struct kobject *kobj,
 	struct device *dev;
 	struct pci_dev *pdev;
 
-	dev = kobj_to_dev(kobj);
+	dev = container_of(kobj, struct device, kobj);
 	pdev = to_pci_dev(dev);
 
 	return find_smbios_instance_string(pdev, NULL, SMBIOS_ATTR_NONE) ?
@@ -221,7 +221,7 @@ static umode_t acpi_index_string_exist(struct kobject *kobj,
 {
 	struct device *dev;
 
-	dev = kobj_to_dev(kobj);
+	dev = container_of(kobj, struct device, kobj);
 
 	if (device_has_dsm(dev))
 		return S_IRUGO;

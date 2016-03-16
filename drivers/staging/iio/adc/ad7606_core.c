@@ -559,7 +559,6 @@ error_disable_reg:
 		regulator_disable(st->reg);
 	return ERR_PTR(ret);
 }
-EXPORT_SYMBOL_GPL(ad7606_probe);
 
 int ad7606_remove(struct iio_dev *indio_dev, int irq)
 {
@@ -576,7 +575,6 @@ int ad7606_remove(struct iio_dev *indio_dev, int irq)
 
 	return 0;
 }
-EXPORT_SYMBOL_GPL(ad7606_remove);
 
 void ad7606_suspend(struct iio_dev *indio_dev)
 {
@@ -588,7 +586,6 @@ void ad7606_suspend(struct iio_dev *indio_dev)
 		gpio_set_value(st->pdata->gpio_stby, 0);
 	}
 }
-EXPORT_SYMBOL_GPL(ad7606_suspend);
 
 void ad7606_resume(struct iio_dev *indio_dev)
 {
@@ -603,7 +600,6 @@ void ad7606_resume(struct iio_dev *indio_dev)
 		ad7606_reset(st);
 	}
 }
-EXPORT_SYMBOL_GPL(ad7606_resume);
 
 MODULE_AUTHOR("Michael Hennerich <hennerich@blackfin.uclinux.org>");
 MODULE_DESCRIPTION("Analog Devices AD7606 ADC");

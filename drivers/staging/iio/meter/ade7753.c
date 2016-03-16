@@ -217,12 +217,8 @@ error_ret:
 static int ade7753_reset(struct device *dev)
 {
 	u16 val;
-	int ret;
 
-	ret = ade7753_spi_read_reg_16(dev, ADE7753_MODE, &val);
-	if (ret)
-		return ret;
-
+	ade7753_spi_read_reg_16(dev, ADE7753_MODE, &val);
 	val |= BIT(6); /* Software Chip Reset */
 
 	return ade7753_spi_write_reg_16(dev, ADE7753_MODE, val);
@@ -347,12 +343,8 @@ error_ret:
 static int ade7753_stop_device(struct device *dev)
 {
 	u16 val;
-	int ret;
 
-	ret = ade7753_spi_read_reg_16(dev, ADE7753_MODE, &val);
-	if (ret)
-		return ret;
-
+	ade7753_spi_read_reg_16(dev, ADE7753_MODE, &val);
 	val |= BIT(4);  /* AD converters can be turned off */
 
 	return ade7753_spi_write_reg_16(dev, ADE7753_MODE, val);

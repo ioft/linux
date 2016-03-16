@@ -608,25 +608,40 @@ static void tc_handle_link_change(struct net_device *dev)
 static int tc_mii_probe(struct net_device *dev)
 {
 	struct tc35815_local *lp = netdev_priv(dev);
-	struct phy_device *phydev;
+	struct phy_device *phydev = NULL;
+	int phy_addr;
 	u32 dropmask;
 
-	phydev = phy_find_first(lp->mii_bus);
+	/* find the first phy */
+	for (phy_addr = 0; phy_addr < PHY_MAX_ADDR; phy_addr++) {
+		if (lp->mii_bus->phy_map[phy_addr]) {
+			if (phydev) {
+				printk(KERN_ERR "%s: multiple PHYs found\n",
+				       dev->name);
+				return -EINVAL;
+			}
+			phydev = lp->mii_bus->phy_map[phy_addr];
+			break;
+		}
+	}
+
 	if (!phydev) {
 		printk(KERN_ERR "%s: no PHY found\n", dev->name);
 		return -ENODEV;
 	}
 
 	/* attach the mac to the phy */
-	phydev = phy_connect(dev, phydev_name(phydev),
+	phydev = phy_connect(dev, dev_name(&phydev->dev),
 			     &tc_handle_link_change,
 			     lp->chiptype == TC35815_TX4939 ? PHY_INTERFACE_MODE_RMII : PHY_INTERFACE_MODE_MII);
 	if (IS_ERR(phydev)) {
 		printk(KERN_ERR "%s: Could not attach to PHY\n", dev->name);
 		return PTR_ERR(phydev);
 	}
-
-	phy_attached_info(phydev);
+	printk(KERN_INFO "%s: attached PHY driver [%s] "
+		"(mii_bus:phy_addr=%s, id=%x)\n",
+		dev->name, phydev->drv->name, dev_name(&phydev->dev),
+		phydev->phy_id);
 
 	/* mask with MAC supported features */
 	phydev->supported &= PHY_BASIC_FEATURES;
@@ -654,6 +669,7 @@ static int tc_mii_init(struct net_device *dev)
 {
 	struct tc35815_local *lp = netdev_priv(dev);
 	int err;
+	int i;
 
 	lp->mii_bus = mdiobus_alloc();
 	if (lp->mii_bus == NULL) {
@@ -668,9 +684,18 @@ static int tc_mii_init(struct net_device *dev)
 		 (lp->pci_dev->bus->number << 8) | lp->pci_dev->devfn);
 	lp->mii_bus->priv = dev;
 	lp->mii_bus->parent = &lp->pci_dev->dev;
+	lp->mii_bus->irq = kmalloc(sizeof(int) * PHY_MAX_ADDR, GFP_KERNEL);
+	if (!lp->mii_bus->irq) {
+		err = -ENOMEM;
+		goto err_out_free_mii_bus;
+	}
+
+	for (i = 0; i < PHY_MAX_ADDR; i++)
+		lp->mii_bus->irq[i] = PHY_POLL;
+
 	err = mdiobus_register(lp->mii_bus);
 	if (err)
-		goto err_out_free_mii_bus;
+		goto err_out_free_mdio_irq;
 	err = tc_mii_probe(dev);
 	if (err)
 		goto err_out_unregister_bus;
@@ -678,6 +703,8 @@ static int tc_mii_init(struct net_device *dev)
 
 err_out_unregister_bus:
 	mdiobus_unregister(lp->mii_bus);
+err_out_free_mdio_irq:
+	kfree(lp->mii_bus->irq);
 err_out_free_mii_bus:
 	mdiobus_free(lp->mii_bus);
 err_out:
@@ -855,6 +882,7 @@ static void tc35815_remove_one(struct pci_dev *pdev)
 
 	phy_disconnect(lp->phy_dev);
 	mdiobus_unregister(lp->mii_bus);
+	kfree(lp->mii_bus->irq);
 	mdiobus_free(lp->mii_bus);
 	unregister_netdev(dev);
 	free_netdev(dev);

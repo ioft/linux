@@ -28,11 +28,3 @@
 		};
 	};
 };
-
-&edma0 {
-	ti,edma-reserved-slot-ranges = <32 50>;
-};
-
-&edma1 {
-	ti,edma-reserved-slot-ranges = <32 90>;
-};

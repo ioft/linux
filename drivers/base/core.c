@@ -2261,10 +2261,7 @@ void set_primary_fwnode(struct device *dev, struct fwnode_handle *fwnode)
 		if (fwnode_is_primary(fn))
 			fn = fn->secondary;
 
-		if (fn) {
-			WARN_ON(fwnode->secondary);
-			fwnode->secondary = fn;
-		}
+		fwnode->secondary = fn;
 		dev->fwnode = fwnode;
 	} else {
 		dev->fwnode = fwnode_is_primary(dev->fwnode) ?

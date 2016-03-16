@@ -67,13 +67,7 @@ static int __afu_open(struct inode *inode, struct file *file, bool master)
 		spin_unlock(&adapter->afu_list_lock);
 		goto err_put_adapter;
 	}
-
-	/*
-	 * taking a ref to the afu so that it doesn't go away
-	 * for rest of the function. This ref is released before
-	 * we return.
-	 */
-	cxl_afu_get(afu);
+	get_device(&afu->dev);
 	spin_unlock(&adapter->afu_list_lock);
 
 	if (!afu->current_mode)
@@ -96,12 +90,13 @@ static int __afu_open(struct inode *inode, struct file *file, bool master)
 	file->private_data = ctx;
 	cxl_ctx_get();
 
-	/* indicate success */
-	rc = 0;
+	/* Our ref on the AFU will now hold the adapter */
+	put_device(&adapter->dev);
+
+	return 0;
 
 err_put_afu:
-	/* release the ref taken earlier */
-	cxl_afu_put(afu);
+	put_device(&afu->dev);
 err_put_adapter:
 	put_device(&adapter->dev);
 	return rc;
@@ -135,6 +130,8 @@ int afu_release(struct inode *inode, struct file *file)
 		ctx->mapping = NULL;
 		mutex_unlock(&ctx->mapping_lock);
 	}
+
+	put_device(&ctx->afu->dev);
 
 	/*
 	 * At this this point all bottom halfs have finished and we should be
@@ -201,12 +198,8 @@ static long afu_ioctl_start_work(struct cxl_context *ctx,
 	 * where a process (master, some daemon, etc) has opened the chardev on
 	 * behalf of another process, so the AFU's mm gets bound to the process
 	 * that performs this ioctl and not the process that opened the file.
-	 * Also we grab the PID of the group leader so that if the task that
-	 * has performed the attach operation exits the mm context of the
-	 * process is still accessible.
 	 */
-	ctx->pid = get_task_pid(current, PIDTYPE_PID);
-	ctx->glpid = get_task_pid(current->group_leader, PIDTYPE_PID);
+	ctx->pid = get_pid(get_task_pid(current, PIDTYPE_PID));
 
 	trace_cxl_attach(ctx, work.work_element_descriptor, work.num_interrupts, amr);
 

@@ -134,7 +134,7 @@ void smp_callin(void)
 
 	local_irq_enable();
 
-	cpu_startup_entry(CPUHP_AP_ONLINE_IDLE);
+	cpu_startup_entry(CPUHP_ONLINE);
 }
 
 void cpu_panic(void)

@@ -307,9 +307,6 @@ static int recv_pkt(struct sk_buff *skb, struct net_device *dev,
 
 	/* check that it's our buffer */
 	if (lowpan_is_ipv6(*skb_network_header(skb))) {
-		/* Pull off the 1-byte of 6lowpan header. */
-		skb_pull(skb, 1);
-
 		/* Copy the packet so that the IPv6 header is
 		 * properly aligned.
 		 */
@@ -320,7 +317,6 @@ static int recv_pkt(struct sk_buff *skb, struct net_device *dev,
 
 		local_skb->protocol = htons(ETH_P_IPV6);
 		local_skb->pkt_type = PACKET_HOST;
-		local_skb->dev = dev;
 
 		skb_set_transport_header(local_skb, sizeof(struct ipv6hdr));
 
@@ -339,8 +335,6 @@ static int recv_pkt(struct sk_buff *skb, struct net_device *dev,
 		if (!local_skb)
 			goto drop;
 
-		local_skb->dev = dev;
-
 		ret = iphc_decompress(local_skb, dev, chan);
 		if (ret < 0) {
 			kfree_skb(local_skb);
@@ -349,6 +343,7 @@ static int recv_pkt(struct sk_buff *skb, struct net_device *dev,
 
 		local_skb->protocol = htons(ETH_P_IPV6);
 		local_skb->pkt_type = PACKET_HOST;
+		local_skb->dev = dev;
 
 		if (give_skb_to_upper(local_skb, dev)
 				!= NET_RX_SUCCESS) {
@@ -830,7 +825,9 @@ static int setup_netdev(struct l2cap_chan *chan, struct lowpan_dev **dev)
 	list_add_rcu(&(*dev)->list, &bt_6lowpan_devices);
 	spin_unlock(&devices_lock);
 
-	err = lowpan_register_netdev(netdev, LOWPAN_LLTYPE_BTLE);
+	lowpan_netdev_setup(netdev, LOWPAN_LLTYPE_BTLE);
+
+	err = register_netdev(netdev);
 	if (err < 0) {
 		BT_INFO("register_netdev failed %d", err);
 		spin_lock(&devices_lock);
@@ -893,7 +890,7 @@ static void delete_netdev(struct work_struct *work)
 	struct lowpan_dev *entry = container_of(work, struct lowpan_dev,
 						delete_netdev);
 
-	lowpan_unregister_netdev(entry->netdev);
+	unregister_netdev(entry->netdev);
 
 	/* The entry pointer is deleted by the netdev destructor. */
 }
@@ -1351,7 +1348,7 @@ static void disconnect_devices(void)
 		ifdown(entry->netdev);
 		BT_DBG("Unregistering netdev %s %p",
 		       entry->netdev->name, entry->netdev);
-		lowpan_unregister_netdev(entry->netdev);
+		unregister_netdev(entry->netdev);
 		kfree(entry);
 	}
 }

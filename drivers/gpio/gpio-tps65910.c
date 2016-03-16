@@ -27,9 +27,14 @@ struct tps65910_gpio {
 	struct tps65910 *tps65910;
 };
 
+static inline struct tps65910_gpio *to_tps65910_gpio(struct gpio_chip *chip)
+{
+	return container_of(chip, struct tps65910_gpio, gpio_chip);
+}
+
 static int tps65910_gpio_get(struct gpio_chip *gc, unsigned offset)
 {
-	struct tps65910_gpio *tps65910_gpio = gpiochip_get_data(gc);
+	struct tps65910_gpio *tps65910_gpio = to_tps65910_gpio(gc);
 	struct tps65910 *tps65910 = tps65910_gpio->tps65910;
 	unsigned int val;
 
@@ -44,7 +49,7 @@ static int tps65910_gpio_get(struct gpio_chip *gc, unsigned offset)
 static void tps65910_gpio_set(struct gpio_chip *gc, unsigned offset,
 			      int value)
 {
-	struct tps65910_gpio *tps65910_gpio = gpiochip_get_data(gc);
+	struct tps65910_gpio *tps65910_gpio = to_tps65910_gpio(gc);
 	struct tps65910 *tps65910 = tps65910_gpio->tps65910;
 
 	if (value)
@@ -58,7 +63,7 @@ static void tps65910_gpio_set(struct gpio_chip *gc, unsigned offset,
 static int tps65910_gpio_output(struct gpio_chip *gc, unsigned offset,
 				int value)
 {
-	struct tps65910_gpio *tps65910_gpio = gpiochip_get_data(gc);
+	struct tps65910_gpio *tps65910_gpio = to_tps65910_gpio(gc);
 	struct tps65910 *tps65910 = tps65910_gpio->tps65910;
 
 	/* Set the initial value */
@@ -70,7 +75,7 @@ static int tps65910_gpio_output(struct gpio_chip *gc, unsigned offset,
 
 static int tps65910_gpio_input(struct gpio_chip *gc, unsigned offset)
 {
-	struct tps65910_gpio *tps65910_gpio = gpiochip_get_data(gc);
+	struct tps65910_gpio *tps65910_gpio = to_tps65910_gpio(gc);
 	struct tps65910 *tps65910 = tps65910_gpio->tps65910;
 
 	return tps65910_reg_clear_bits(tps65910, TPS65910_GPIO0 + offset,
@@ -141,7 +146,7 @@ static int tps65910_gpio_probe(struct platform_device *pdev)
 	tps65910_gpio->gpio_chip.direction_output = tps65910_gpio_output;
 	tps65910_gpio->gpio_chip.set	= tps65910_gpio_set;
 	tps65910_gpio->gpio_chip.get	= tps65910_gpio_get;
-	tps65910_gpio->gpio_chip.parent = &pdev->dev;
+	tps65910_gpio->gpio_chip.dev = &pdev->dev;
 #ifdef CONFIG_OF_GPIO
 	tps65910_gpio->gpio_chip.of_node = tps65910->dev->of_node;
 #endif
@@ -170,7 +175,7 @@ static int tps65910_gpio_probe(struct platform_device *pdev)
 	}
 
 skip_init:
-	ret = gpiochip_add_data(&tps65910_gpio->gpio_chip, tps65910_gpio);
+	ret = gpiochip_add(&tps65910_gpio->gpio_chip);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "Could not register gpiochip, %d\n", ret);
 		return ret;

@@ -48,9 +48,6 @@ config COMPAT_NETLINK_MESSAGES
 config NET_INGRESS
 	bool
 
-config NET_EGRESS
-	bool
-
 menu "Networking options"
 
 source "net/packet/Kconfig"
@@ -253,14 +250,9 @@ config XPS
 	depends on SMP
 	default y
 
-config SOCK_CGROUP_DATA
-	bool
-	default n
-
 config CGROUP_NET_PRIO
 	bool "Network priority cgroup"
 	depends on CGROUPS
-	select SOCK_CGROUP_DATA
 	---help---
 	  Cgroup subsystem for use in assigning processes to network priorities on
 	  a per-interface basis.
@@ -268,7 +260,6 @@ config CGROUP_NET_PRIO
 config CGROUP_NET_CLASSID
 	bool "Network classid cgroup"
 	depends on CGROUPS
-	select SOCK_CGROUP_DATA
 	---help---
 	  Cgroup subsystem for use as general purpose socket classid marker that is
 	  being used in cls_cgroup and for netfilter matching.

@@ -65,17 +65,19 @@ static pte_t *walk_page_table(unsigned long addr)
 static void change_page_attr(unsigned long addr, int numpages,
 			     pte_t (*set) (pte_t))
 {
-	pte_t *ptep;
+	pte_t *ptep, pte;
 	int i;
 
 	for (i = 0; i < numpages; i++) {
 		ptep = walk_page_table(addr);
 		if (WARN_ON_ONCE(!ptep))
 			break;
-		*ptep = set(*ptep);
+		pte = *ptep;
+		pte = set(pte);
+		__ptep_ipte(addr, ptep);
+		*ptep = pte;
 		addr += PAGE_SIZE;
 	}
-	__tlb_flush_kernel();
 }
 
 int set_memory_ro(unsigned long addr, int numpages)

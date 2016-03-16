@@ -5185,7 +5185,8 @@ static int rbd_dev_probe_parent(struct rbd_device *rbd_dev, int depth)
 
 out_err:
 	rbd_dev_unparent(rbd_dev);
-	rbd_dev_destroy(parent);
+	if (parent)
+		rbd_dev_destroy(parent);
 	return ret;
 }
 

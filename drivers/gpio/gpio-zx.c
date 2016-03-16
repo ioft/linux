@@ -43,9 +43,14 @@ struct zx_gpio {
 	struct gpio_chip	gc;
 };
 
+static inline struct zx_gpio *to_zx(struct gpio_chip *gc)
+{
+	return container_of(gc, struct zx_gpio, gc);
+}
+
 static int zx_direction_input(struct gpio_chip *gc, unsigned offset)
 {
-	struct zx_gpio *chip = gpiochip_get_data(gc);
+	struct zx_gpio *chip = to_zx(gc);
 	unsigned long flags;
 	u16 gpiodir;
 
@@ -64,7 +69,7 @@ static int zx_direction_input(struct gpio_chip *gc, unsigned offset)
 static int zx_direction_output(struct gpio_chip *gc, unsigned offset,
 		int value)
 {
-	struct zx_gpio *chip = gpiochip_get_data(gc);
+	struct zx_gpio *chip = to_zx(gc);
 	unsigned long flags;
 	u16 gpiodir;
 
@@ -87,14 +92,14 @@ static int zx_direction_output(struct gpio_chip *gc, unsigned offset,
 
 static int zx_get_value(struct gpio_chip *gc, unsigned offset)
 {
-	struct zx_gpio *chip = gpiochip_get_data(gc);
+	struct zx_gpio *chip = to_zx(gc);
 
 	return !!(readw_relaxed(chip->base + ZX_GPIO_DI) & BIT(offset));
 }
 
 static void zx_set_value(struct gpio_chip *gc, unsigned offset, int value)
 {
-	struct zx_gpio *chip = gpiochip_get_data(gc);
+	struct zx_gpio *chip = to_zx(gc);
 
 	if (value)
 		writew_relaxed(BIT(offset), chip->base + ZX_GPIO_DO1);
@@ -105,7 +110,7 @@ static void zx_set_value(struct gpio_chip *gc, unsigned offset, int value)
 static int zx_irq_type(struct irq_data *d, unsigned trigger)
 {
 	struct gpio_chip *gc = irq_data_get_irq_chip_data(d);
-	struct zx_gpio *chip = gpiochip_get_data(gc);
+	struct zx_gpio *chip = to_zx(gc);
 	int offset = irqd_to_hwirq(d);
 	unsigned long flags;
 	u16 gpiois, gpioi_epos, gpioi_eneg, gpioiev;
@@ -157,7 +162,7 @@ static void zx_irq_handler(struct irq_desc *desc)
 	unsigned long pending;
 	int offset;
 	struct gpio_chip *gc = irq_desc_get_handler_data(desc);
-	struct zx_gpio *chip = gpiochip_get_data(gc);
+	struct zx_gpio *chip = to_zx(gc);
 	struct irq_chip *irqchip = irq_desc_get_chip(desc);
 
 	chained_irq_enter(irqchip, desc);
@@ -176,7 +181,7 @@ static void zx_irq_handler(struct irq_desc *desc)
 static void zx_irq_mask(struct irq_data *d)
 {
 	struct gpio_chip *gc = irq_data_get_irq_chip_data(d);
-	struct zx_gpio *chip = gpiochip_get_data(gc);
+	struct zx_gpio *chip = to_zx(gc);
 	u16 mask = BIT(irqd_to_hwirq(d) % ZX_GPIO_NR);
 	u16 gpioie;
 
@@ -191,7 +196,7 @@ static void zx_irq_mask(struct irq_data *d)
 static void zx_irq_unmask(struct irq_data *d)
 {
 	struct gpio_chip *gc = irq_data_get_irq_chip_data(d);
-	struct zx_gpio *chip = gpiochip_get_data(gc);
+	struct zx_gpio *chip = to_zx(gc);
 	u16 mask = BIT(irqd_to_hwirq(d) % ZX_GPIO_NR);
 	u16 gpioie;
 
@@ -240,10 +245,10 @@ static int zx_gpio_probe(struct platform_device *pdev)
 	chip->gc.base = ZX_GPIO_NR * id;
 	chip->gc.ngpio = ZX_GPIO_NR;
 	chip->gc.label = dev_name(dev);
-	chip->gc.parent = dev;
+	chip->gc.dev = dev;
 	chip->gc.owner = THIS_MODULE;
 
-	ret = gpiochip_add_data(&chip->gc, chip);
+	ret = gpiochip_add(&chip->gc);
 	if (ret)
 		return ret;
 

@@ -15,13 +15,12 @@
 #include <linux/io.h>
 #include <linux/kernel.h>
 #include <linux/mfd/syscon.h>
-#include <linux/init.h>
+#include <linux/module.h>
 #include <linux/of_device.h>
 #include <linux/platform_device.h>
 #include <linux/pm_domain.h>
 #include <linux/regmap.h>
 #include <linux/soc/mediatek/infracfg.h>
-#include <linux/regulator/consumer.h>
 #include <dt-bindings/power/mt8173-power.h>
 
 #define SPM_VDE_PWR_CON			0x0210
@@ -180,7 +179,6 @@ struct scp_domain {
 	u32 sram_pdn_ack_bits;
 	u32 bus_prot_mask;
 	bool active_wakeup;
-	struct regulator *supply;
 };
 
 struct scp {
@@ -222,12 +220,6 @@ static int scpsys_power_on(struct generic_pm_domain *genpd)
 	u32 val;
 	int ret;
 	int i;
-
-	if (scpd->supply) {
-		ret = regulator_enable(scpd->supply);
-		if (ret)
-			return ret;
-	}
 
 	for (i = 0; i < MAX_CLKS && scpd->clk[i]; i++) {
 		ret = clk_prepare_enable(scpd->clk[i]);
@@ -307,9 +299,6 @@ err_pwr_ack:
 			clk_disable_unprepare(scpd->clk[i]);
 	}
 err_clk:
-	if (scpd->supply)
-		regulator_disable(scpd->supply);
-
 	dev_err(scp->dev, "Failed to power on domain %s\n", genpd->name);
 
 	return ret;
@@ -390,9 +379,6 @@ static int scpsys_power_off(struct generic_pm_domain *genpd)
 	for (i = 0; i < MAX_CLKS && scpd->clk[i]; i++)
 		clk_disable_unprepare(scpd->clk[i]);
 
-	if (scpd->supply)
-		regulator_disable(scpd->supply);
-
 	return 0;
 
 out:
@@ -460,19 +446,6 @@ static int __init scpsys_probe(struct platform_device *pdev)
 		dev_err(&pdev->dev, "Cannot find infracfg controller: %ld\n",
 				PTR_ERR(scp->infracfg));
 		return PTR_ERR(scp->infracfg);
-	}
-
-	for (i = 0; i < NUM_DOMAINS; i++) {
-		struct scp_domain *scpd = &scp->domains[i];
-		const struct scp_domain_data *data = &scp_domain_data[i];
-
-		scpd->supply = devm_regulator_get_optional(&pdev->dev, data->name);
-		if (IS_ERR(scpd->supply)) {
-			if (PTR_ERR(scpd->supply) == -ENODEV)
-				scpd->supply = NULL;
-			else
-				return PTR_ERR(scpd->supply);
-		}
 	}
 
 	pd_data->num_domains = NUM_DOMAINS;
@@ -548,4 +521,5 @@ static struct platform_driver scpsys_drv = {
 		.of_match_table = of_match_ptr(of_scpsys_match_tbl),
 	},
 };
-builtin_platform_driver_probe(scpsys_drv, scpsys_probe);
+
+module_platform_driver_probe(scpsys_drv, scpsys_probe);

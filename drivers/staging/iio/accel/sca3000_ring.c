@@ -48,7 +48,7 @@ static int sca3000_read_data(struct sca3000_state *st,
 		}
 	};
 	*rx_p = kmalloc(len, GFP_KERNEL);
-	if (!*rx_p) {
+	if (*rx_p == NULL) {
 		ret = -ENOMEM;
 		goto error_ret;
 	}

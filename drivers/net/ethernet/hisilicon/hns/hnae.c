@@ -95,17 +95,21 @@ static struct hnae_buf_ops hnae_bops = {
 static int __ae_match(struct device *dev, const void *data)
 {
 	struct hnae_ae_dev *hdev = cls_to_ae_dev(dev);
+	const char *ae_id = data;
 
-	return hdev->dev->of_node == data;
+	if (!strncmp(ae_id, hdev->name, AE_NAME_SIZE))
+		return 1;
+
+	return 0;
 }
 
-static struct hnae_ae_dev *find_ae(const struct device_node *ae_node)
+static struct hnae_ae_dev *find_ae(const char *ae_id)
 {
 	struct device *dev;
 
-	WARN_ON(!ae_node);
+	WARN_ON(!ae_id);
 
-	dev = class_find_device(hnae_class, NULL, ae_node, __ae_match);
+	dev = class_find_device(hnae_class, NULL, ae_id, __ae_match);
 
 	return dev ? cls_to_ae_dev(dev) : NULL;
 }
@@ -312,8 +316,7 @@ EXPORT_SYMBOL(hnae_reinit_handle);
  * return handle ptr or ERR_PTR
  */
 struct hnae_handle *hnae_get_handle(struct device *owner_dev,
-				    const struct device_node *ae_node,
-				    u32 port_id,
+				    const char *ae_id, u32 port_id,
 				    struct hnae_buf_ops *bops)
 {
 	struct hnae_ae_dev *dev;
@@ -321,7 +324,7 @@ struct hnae_handle *hnae_get_handle(struct device *owner_dev,
 	int i, j;
 	int ret;
 
-	dev = find_ae(ae_node);
+	dev = find_ae(ae_id);
 	if (!dev)
 		return ERR_PTR(-ENODEV);
 

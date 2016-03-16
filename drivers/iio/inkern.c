@@ -61,10 +61,12 @@ EXPORT_SYMBOL_GPL(iio_map_array_register);
 int iio_map_array_unregister(struct iio_dev *indio_dev)
 {
 	int ret = -ENODEV;
-	struct iio_map_internal *mapi, *next;
+	struct iio_map_internal *mapi;
+	struct list_head *pos, *tmp;
 
 	mutex_lock(&iio_map_list_lock);
-	list_for_each_entry_safe(mapi, next, &iio_map_list, l) {
+	list_for_each_safe(pos, tmp, &iio_map_list) {
+		mapi = list_entry(pos, struct iio_map_internal, l);
 		if (indio_dev == mapi->indio_dev) {
 			list_del(&mapi->l);
 			kfree(mapi);
@@ -349,8 +351,6 @@ EXPORT_SYMBOL_GPL(iio_channel_get);
 
 void iio_channel_release(struct iio_channel *channel)
 {
-	if (!channel)
-		return;
 	iio_device_put(channel->indio_dev);
 	kfree(channel);
 }

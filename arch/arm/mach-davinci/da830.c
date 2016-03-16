@@ -15,7 +15,7 @@
 
 #include <asm/mach/map.h>
 
-#include "psc.h"
+#include <mach/psc.h>
 #include <mach/irqs.h>
 #include <mach/cputype.h>
 #include <mach/common.h>

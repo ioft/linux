@@ -109,7 +109,11 @@ struct compat_kexec_segment {
 };
 #endif
 
-#ifdef CONFIG_KEXEC_FILE
+struct kexec_sha_region {
+	unsigned long start;
+	unsigned long len;
+};
+
 struct purgatory_info {
 	/* Pointer to elf header of read only purgatory */
 	Elf_Ehdr *ehdr;
@@ -125,28 +129,6 @@ struct purgatory_info {
 	/* Address where purgatory is finally loaded and is executed from */
 	unsigned long purgatory_load_addr;
 };
-
-typedef int (kexec_probe_t)(const char *kernel_buf, unsigned long kernel_size);
-typedef void *(kexec_load_t)(struct kimage *image, char *kernel_buf,
-			     unsigned long kernel_len, char *initrd,
-			     unsigned long initrd_len, char *cmdline,
-			     unsigned long cmdline_len);
-typedef int (kexec_cleanup_t)(void *loader_data);
-
-#ifdef CONFIG_KEXEC_VERIFY_SIG
-typedef int (kexec_verify_sig_t)(const char *kernel_buf,
-				 unsigned long kernel_len);
-#endif
-
-struct kexec_file_ops {
-	kexec_probe_t *probe;
-	kexec_load_t *load;
-	kexec_cleanup_t *cleanup;
-#ifdef CONFIG_KEXEC_VERIFY_SIG
-	kexec_verify_sig_t *verify_sig;
-#endif
-};
-#endif
 
 struct kimage {
 	kimage_entry_t head;
@@ -179,7 +161,6 @@ struct kimage {
 	struct kimage_arch arch;
 #endif
 
-#ifdef CONFIG_KEXEC_FILE
 	/* Additional fields for file based kexec syscall */
 	void *kernel_buf;
 	unsigned long kernel_buf_len;
@@ -198,7 +179,38 @@ struct kimage {
 
 	/* Information for loading purgatory */
 	struct purgatory_info purgatory_info;
-#endif
+};
+
+/*
+ * Keeps track of buffer parameters as provided by caller for requesting
+ * memory placement of buffer.
+ */
+struct kexec_buf {
+	struct kimage *image;
+	char *buffer;
+	unsigned long bufsz;
+	unsigned long mem;
+	unsigned long memsz;
+	unsigned long buf_align;
+	unsigned long buf_min;
+	unsigned long buf_max;
+	bool top_down;		/* allocate from top of memory hole */
+};
+
+typedef int (kexec_probe_t)(const char *kernel_buf, unsigned long kernel_size);
+typedef void *(kexec_load_t)(struct kimage *image, char *kernel_buf,
+			     unsigned long kernel_len, char *initrd,
+			     unsigned long initrd_len, char *cmdline,
+			     unsigned long cmdline_len);
+typedef int (kexec_cleanup_t)(void *loader_data);
+typedef int (kexec_verify_sig_t)(const char *kernel_buf,
+				 unsigned long kernel_len);
+
+struct kexec_file_ops {
+	kexec_probe_t *probe;
+	kexec_load_t *load;
+	kexec_cleanup_t *cleanup;
+	kexec_verify_sig_t *verify_sig;
 };
 
 /* kexec interface functions */
@@ -225,7 +237,6 @@ extern int kexec_purgatory_get_set_symbol(struct kimage *image,
 					  unsigned int size, bool get_value);
 extern void *kexec_purgatory_get_symbol_addr(struct kimage *image,
 					     const char *name);
-extern void __crash_kexec(struct pt_regs *);
 extern void crash_kexec(struct pt_regs *);
 int kexec_should_crash(struct task_struct *);
 void crash_save_cpu(struct pt_regs *regs, int cpu);
@@ -321,7 +332,6 @@ int __weak arch_kexec_apply_relocations(const Elf_Ehdr *ehdr, Elf_Shdr *sechdrs,
 #else /* !CONFIG_KEXEC_CORE */
 struct pt_regs;
 struct task_struct;
-static inline void __crash_kexec(struct pt_regs *regs) { }
 static inline void crash_kexec(struct pt_regs *regs) { }
 static inline int kexec_should_crash(struct task_struct *p) { return 0; }
 #define kexec_in_progress false

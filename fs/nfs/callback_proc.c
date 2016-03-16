@@ -83,11 +83,8 @@ __be32 nfs4_callback_recall(struct cb_recallargs *args, void *dummy,
 
 	res = htonl(NFS4ERR_BADHANDLE);
 	inode = nfs_delegation_find_inode(cps->clp, &args->fh);
-	if (inode == NULL) {
-		trace_nfs4_cb_recall(cps->clp, &args->fh, NULL,
-				&args->stateid, -ntohl(res));
+	if (inode == NULL)
 		goto out;
-	}
 	/* Set up a helper thread to actually return the delegation */
 	switch (nfs_async_inode_return_delegation(inode, &args->stateid)) {
 	case 0:
@@ -99,8 +96,7 @@ __be32 nfs4_callback_recall(struct cb_recallargs *args, void *dummy,
 	default:
 		res = htonl(NFS4ERR_RESOURCE);
 	}
-	trace_nfs4_cb_recall(cps->clp, &args->fh, inode,
-			&args->stateid, -ntohl(res));
+	trace_nfs4_recall_delegation(inode, -ntohl(res));
 	iput(inode);
 out:
 	dprintk("%s: exit with status = %d\n", __func__, ntohl(res));
@@ -164,22 +160,6 @@ static struct pnfs_layout_hdr * get_layout_by_fh(struct nfs_client *clp,
 	return lo;
 }
 
-/*
- * Enforce RFC5661 section 12.5.5.2.1. (Layout Recall and Return Sequencing)
- */
-static bool pnfs_check_stateid_sequence(struct pnfs_layout_hdr *lo,
-					const nfs4_stateid *new)
-{
-	u32 oldseq, newseq;
-
-	oldseq = be32_to_cpu(lo->plh_stateid.seqid);
-	newseq = be32_to_cpu(new->seqid);
-
-	if (newseq > oldseq + 1)
-		return false;
-	return true;
-}
-
 static u32 initiate_file_draining(struct nfs_client *clp,
 				  struct cb_layoutrecallargs *args)
 {
@@ -189,36 +169,22 @@ static u32 initiate_file_draining(struct nfs_client *clp,
 	LIST_HEAD(free_me_list);
 
 	lo = get_layout_by_fh(clp, &args->cbl_fh, &args->cbl_stateid);
-	if (!lo) {
-		trace_nfs4_cb_layoutrecall_file(clp, &args->cbl_fh, NULL,
-				&args->cbl_stateid, -rv);
+	if (!lo)
 		goto out;
-	}
 
 	ino = lo->plh_inode;
 
 	spin_lock(&ino->i_lock);
-	if (!pnfs_check_stateid_sequence(lo, &args->cbl_stateid)) {
-		rv = NFS4ERR_DELAY;
-		goto unlock;
-	}
 	pnfs_set_layout_stateid(lo, &args->cbl_stateid, true);
 	spin_unlock(&ino->i_lock);
 
 	pnfs_layoutcommit_inode(ino, false);
 
 	spin_lock(&ino->i_lock);
-	/*
-	 * Enforce RFC5661 Section 12.5.5.2.1.5 (Bulk Recall and Return)
-	 */
-	if (test_bit(NFS_LAYOUT_BULK_RECALL, &lo->plh_flags)) {
-		rv = NFS4ERR_DELAY;
-		goto unlock;
-	}
-
-	if (pnfs_mark_matching_lsegs_return(lo, &free_me_list,
+	if (test_bit(NFS_LAYOUT_BULK_RECALL, &lo->plh_flags) ||
+	    pnfs_mark_matching_lsegs_invalid(lo, &free_me_list,
 					&args->cbl_range)) {
-		rv = NFS4_OK;
+		rv = NFS4ERR_DELAY;
 		goto unlock;
 	}
 
@@ -226,15 +192,11 @@ static u32 initiate_file_draining(struct nfs_client *clp,
 		NFS_SERVER(ino)->pnfs_curr_ld->return_range(lo,
 			&args->cbl_range);
 	}
-	pnfs_mark_layout_returned_if_empty(lo);
 unlock:
 	spin_unlock(&ino->i_lock);
 	pnfs_free_lseg_list(&free_me_list);
-	/* Free all lsegs that are attached to commit buckets */
-	nfs_commit_inode(ino, 0);
 	pnfs_put_layout_hdr(lo);
-	trace_nfs4_cb_layoutrecall_file(clp, &args->cbl_fh, ino,
-			&args->cbl_stateid, -rv);
+	trace_nfs4_cb_layoutrecall_inode(clp, &args->cbl_fh, ino, -rv);
 	iput(ino);
 out:
 	return rv;

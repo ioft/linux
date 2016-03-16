@@ -212,6 +212,7 @@ struct ib_fmr_pool *ib_create_fmr_pool(struct ib_pd             *pd,
 {
 	struct ib_device   *device;
 	struct ib_fmr_pool *pool;
+	struct ib_device_attr *attr;
 	int i;
 	int ret;
 	int max_remaps;
@@ -227,10 +228,25 @@ struct ib_fmr_pool *ib_create_fmr_pool(struct ib_pd             *pd,
 		return ERR_PTR(-ENOSYS);
 	}
 
-	if (!device->attrs.max_map_per_fmr)
+	attr = kmalloc(sizeof *attr, GFP_KERNEL);
+	if (!attr) {
+		printk(KERN_WARNING PFX "couldn't allocate device attr struct\n");
+		return ERR_PTR(-ENOMEM);
+	}
+
+	ret = ib_query_device(device, attr);
+	if (ret) {
+		printk(KERN_WARNING PFX "couldn't query device: %d\n", ret);
+		kfree(attr);
+		return ERR_PTR(ret);
+	}
+
+	if (!attr->max_map_per_fmr)
 		max_remaps = IB_FMR_MAX_REMAPS;
 	else
-		max_remaps = device->attrs.max_map_per_fmr;
+		max_remaps = attr->max_map_per_fmr;
+
+	kfree(attr);
 
 	pool = kmalloc(sizeof *pool, GFP_KERNEL);
 	if (!pool) {

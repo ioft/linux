@@ -29,7 +29,6 @@
 #include <linux/mfd/samsung/s2mps11.h>
 #include <linux/mfd/samsung/s2mps13.h>
 #include <linux/mfd/samsung/s2mps14.h>
-#include <linux/mfd/samsung/s2mps15.h>
 #include <linux/mfd/samsung/s2mpu02.h>
 #include <linux/mfd/samsung/s5m8763.h>
 #include <linux/mfd/samsung/s5m8767.h>
@@ -68,7 +67,7 @@ static const struct mfd_cell s5m8767_devs[] = {
 
 static const struct mfd_cell s2mps11_devs[] = {
 	{
-		.name = "s2mps11-regulator",
+		.name = "s2mps11-pmic",
 	}, {
 		.name = "s2mps14-rtc",
 	}, {
@@ -78,7 +77,7 @@ static const struct mfd_cell s2mps11_devs[] = {
 };
 
 static const struct mfd_cell s2mps13_devs[] = {
-	{ .name = "s2mps13-regulator", },
+	{ .name = "s2mps13-pmic", },
 	{ .name = "s2mps13-rtc", },
 	{
 		.name = "s2mps13-clk",
@@ -88,24 +87,13 @@ static const struct mfd_cell s2mps13_devs[] = {
 
 static const struct mfd_cell s2mps14_devs[] = {
 	{
-		.name = "s2mps14-regulator",
+		.name = "s2mps14-pmic",
 	}, {
 		.name = "s2mps14-rtc",
 	}, {
 		.name = "s2mps14-clk",
 		.of_compatible = "samsung,s2mps14-clk",
 	}
-};
-
-static const struct mfd_cell s2mps15_devs[] = {
-	{
-		.name = "s2mps15-regulator",
-	}, {
-		.name = "s2mps15-rtc",
-	}, {
-		.name = "s2mps13-clk",
-		.of_compatible = "samsung,s2mps13-clk",
-	},
 };
 
 static const struct mfd_cell s2mpa01_devs[] = {
@@ -116,7 +104,7 @@ static const struct mfd_cell s2mpa01_devs[] = {
 
 static const struct mfd_cell s2mpu02_devs[] = {
 	{
-		.name = "s2mpu02-regulator",
+		.name = "s2mpu02-pmic",
 	},
 };
 
@@ -133,9 +121,6 @@ static const struct of_device_id sec_dt_match[] = {
 	}, {
 		.compatible = "samsung,s2mps14-pmic",
 		.data = (void *)S2MPS14X,
-	}, {
-		.compatible = "samsung,s2mps15-pmic",
-		.data = (void *)S2MPS15X,
 	}, {
 		.compatible = "samsung,s2mpa01-pmic",
 		.data = (void *)S2MPA01,
@@ -234,15 +219,6 @@ static const struct regmap_config s2mps14_regmap_config = {
 	.val_bits = 8,
 
 	.max_register = S2MPS14_REG_LDODSCH3,
-	.volatile_reg = s2mps11_volatile,
-	.cache_type = REGCACHE_FLAT,
-};
-
-static const struct regmap_config s2mps15_regmap_config = {
-	.reg_bits = 8,
-	.val_bits = 8,
-
-	.max_register = S2MPS15_REG_LDODSCH4,
 	.volatile_reg = s2mps11_volatile,
 	.cache_type = REGCACHE_FLAT,
 };
@@ -408,9 +384,6 @@ static int sec_pmic_probe(struct i2c_client *i2c,
 	case S2MPS14X:
 		regmap = &s2mps14_regmap_config;
 		break;
-	case S2MPS15X:
-		regmap = &s2mps15_regmap_config;
-		break;
 	case S5M8763X:
 		regmap = &s5m8763_regmap_config;
 		break;
@@ -468,10 +441,6 @@ static int sec_pmic_probe(struct i2c_client *i2c,
 	case S2MPS14X:
 		sec_devs = s2mps14_devs;
 		num_sec_devs = ARRAY_SIZE(s2mps14_devs);
-		break;
-	case S2MPS15X:
-		sec_devs = s2mps15_devs;
-		num_sec_devs = ARRAY_SIZE(s2mps15_devs);
 		break;
 	case S2MPU02:
 		sec_devs = s2mpu02_devs;
@@ -536,7 +505,7 @@ static void sec_pmic_shutdown(struct i2c_client *i2c)
 #ifdef CONFIG_PM_SLEEP
 static int sec_pmic_suspend(struct device *dev)
 {
-	struct i2c_client *i2c = to_i2c_client(dev);
+	struct i2c_client *i2c = container_of(dev, struct i2c_client, dev);
 	struct sec_pmic_dev *sec_pmic = i2c_get_clientdata(i2c);
 
 	if (device_may_wakeup(dev))
@@ -557,7 +526,7 @@ static int sec_pmic_suspend(struct device *dev)
 
 static int sec_pmic_resume(struct device *dev)
 {
-	struct i2c_client *i2c = to_i2c_client(dev);
+	struct i2c_client *i2c = container_of(dev, struct i2c_client, dev);
 	struct sec_pmic_dev *sec_pmic = i2c_get_clientdata(i2c);
 
 	if (device_may_wakeup(dev))

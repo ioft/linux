@@ -1147,13 +1147,13 @@ static int __init ssi_port_probe(struct platform_device *pd)
 		goto error;
 	}
 
-	err = of_get_named_gpio(np, "ti,ssi-cawake-gpio", 0);
-	if (err < 0) {
+	cawake_gpio = of_get_named_gpio(np, "ti,ssi-cawake-gpio", 0);
+	if (cawake_gpio < 0) {
 		dev_err(&pd->dev, "DT data is missing cawake gpio (err=%d)\n",
-			err);
+			cawake_gpio);
+		err = -ENODEV;
 		goto error;
 	}
-	cawake_gpio = err;
 
 	err = devm_gpio_request_one(&port->device, cawake_gpio, GPIOF_DIR_IN,
 		"cawake");

@@ -133,8 +133,9 @@ static int socfpga_reset_probe(struct platform_device *pdev)
 	data->rcdev.nr_resets = NR_BANKS * BITS_PER_LONG;
 	data->rcdev.ops = &socfpga_reset_ops;
 	data->rcdev.of_node = pdev->dev.of_node;
+	reset_controller_register(&data->rcdev);
 
-	return reset_controller_register(&data->rcdev);
+	return 0;
 }
 
 static int socfpga_reset_remove(struct platform_device *pdev)

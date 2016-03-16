@@ -32,7 +32,6 @@
 #include <linux/err.h>
 #include <linux/ioctl.h>
 #include <linux/init.h>
-#include <linux/of.h>
 #include <linux/proc_fs.h>
 #include <linux/idr.h>
 #include <linux/backing-dev.h>
@@ -446,7 +445,6 @@ int add_mtd_device(struct mtd_info *mtd)
 	mtd->dev.devt = MTD_DEVT(i);
 	dev_set_name(&mtd->dev, "mtd%d", i);
 	dev_set_drvdata(&mtd->dev, mtd);
-	of_node_get(mtd_get_of_node(mtd));
 	error = device_register(&mtd->dev);
 	if (error)
 		goto fail_added;
@@ -469,7 +467,6 @@ int add_mtd_device(struct mtd_info *mtd)
 	return 0;
 
 fail_added:
-	of_node_put(mtd_get_of_node(mtd));
 	idr_remove(&mtd_idr, i);
 fail_locked:
 	mutex_unlock(&mtd_table_mutex);
@@ -511,7 +508,6 @@ int del_mtd_device(struct mtd_info *mtd)
 		device_unregister(&mtd->dev);
 
 		idr_remove(&mtd_idr, mtd->index);
-		of_node_put(mtd_get_of_node(mtd));
 
 		module_put(THIS_MODULE);
 		ret = 0;
@@ -523,10 +519,9 @@ out_error:
 }
 
 static int mtd_add_device_partitions(struct mtd_info *mtd,
-				     struct mtd_partitions *parts)
+				     struct mtd_partition *real_parts,
+				     int nbparts)
 {
-	const struct mtd_partition *real_parts = parts->parts;
-	int nbparts = parts->nr_parts;
 	int ret;
 
 	if (nbparts == 0 || IS_ENABLED(CONFIG_MTD_PARTITIONED_MASTER)) {
@@ -595,29 +590,29 @@ int mtd_device_parse_register(struct mtd_info *mtd, const char * const *types,
 			      const struct mtd_partition *parts,
 			      int nr_parts)
 {
-	struct mtd_partitions parsed;
 	int ret;
+	struct mtd_partition *real_parts = NULL;
 
 	mtd_set_dev_defaults(mtd);
 
-	memset(&parsed, 0, sizeof(parsed));
-
-	ret = parse_mtd_partitions(mtd, types, &parsed, parser_data);
-	if ((ret < 0 || parsed.nr_parts == 0) && parts && nr_parts) {
-		/* Fall back to driver-provided partitions */
-		parsed = (struct mtd_partitions){
-			.parts		= parts,
-			.nr_parts	= nr_parts,
-		};
-	} else if (ret < 0) {
-		/* Didn't come up with parsed OR fallback partitions */
+	ret = parse_mtd_partitions(mtd, types, &real_parts, parser_data);
+	if (ret <= 0 && nr_parts && parts) {
+		real_parts = kmemdup(parts, sizeof(*parts) * nr_parts,
+				     GFP_KERNEL);
+		if (!real_parts)
+			ret = -ENOMEM;
+		else
+			ret = nr_parts;
+	}
+	/* Didn't come up with either parsed OR fallback partitions */
+	if (ret < 0) {
 		pr_info("mtd: failed to find partitions; one or more parsers reports errors (%d)\n",
 			ret);
 		/* Don't abort on errors; we can still use unpartitioned MTD */
-		memset(&parsed, 0, sizeof(parsed));
+		ret = 0;
 	}
 
-	ret = mtd_add_device_partitions(mtd, &parsed);
+	ret = mtd_add_device_partitions(mtd, real_parts, ret);
 	if (ret)
 		goto out;
 
@@ -637,8 +632,7 @@ int mtd_device_parse_register(struct mtd_info *mtd, const char * const *types,
 	}
 
 out:
-	/* Cleanup any parsed partitions */
-	mtd_part_parser_cleanup(&parsed);
+	kfree(real_parts);
 	return ret;
 }
 EXPORT_SYMBOL_GPL(mtd_device_parse_register);

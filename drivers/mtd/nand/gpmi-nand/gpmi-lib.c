@@ -919,7 +919,7 @@ static int enable_edo_mode(struct gpmi_nand_data *this, int mode)
 {
 	struct resources  *r = &this->resources;
 	struct nand_chip *nand = &this->nand;
-	struct mtd_info	 *mtd = nand_to_mtd(nand);
+	struct mtd_info	 *mtd = &this->mtd;
 	uint8_t *feature;
 	unsigned long rate;
 	int ret;

@@ -976,8 +976,7 @@ static int rtl2832_regmap_read(void *context, const void *reg_buf,
 
 	ret = __i2c_transfer(client->adapter, msg, 2);
 	if (ret != 2) {
-		dev_warn(&client->dev, "i2c reg read failed %d reg %02x\n",
-			 ret, *(u8 *)reg_buf);
+		dev_warn(&client->dev, "i2c reg read failed %d\n", ret);
 		if (ret >= 0)
 			ret = -EREMOTEIO;
 		return ret;
@@ -1000,8 +999,7 @@ static int rtl2832_regmap_write(void *context, const void *data, size_t count)
 
 	ret = __i2c_transfer(client->adapter, msg, 1);
 	if (ret != 1) {
-		dev_warn(&client->dev, "i2c reg write failed %d reg %02x\n",
-			 ret, *(u8 *)data);
+		dev_warn(&client->dev, "i2c reg write failed %d\n", ret);
 		if (ret >= 0)
 			ret = -EREMOTEIO;
 		return ret;
@@ -1030,8 +1028,7 @@ static int rtl2832_regmap_gather_write(void *context, const void *reg,
 
 	ret = __i2c_transfer(client->adapter, msg, 1);
 	if (ret != 1) {
-		dev_warn(&client->dev, "i2c reg write failed %d reg %02x\n",
-			 ret, *(u8 const *)reg);
+		dev_warn(&client->dev, "i2c reg write failed %d\n", ret);
 		if (ret >= 0)
 			ret = -EREMOTEIO;
 		return ret;
@@ -1097,6 +1094,18 @@ static int rtl2832_enable_slave_ts(struct i2c_client *client)
 		goto err;
 
 	ret = rtl2832_bulk_write(client, 0x0bc, "\x18", 1);
+	if (ret)
+		goto err;
+
+	ret = rtl2832_bulk_write(client, 0x022, "\x01", 1);
+	if (ret)
+		goto err;
+
+	ret = rtl2832_bulk_write(client, 0x026, "\x1f", 1);
+	if (ret)
+		goto err;
+
+	ret = rtl2832_bulk_write(client, 0x027, "\xff", 1);
 	if (ret)
 		goto err;
 

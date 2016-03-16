@@ -83,13 +83,10 @@ static int vmbus_negotiate_version(struct vmbus_channel_msginfo *msginfo,
 	msg->interrupt_page = virt_to_phys(vmbus_connection.int_page);
 	msg->monitor_page1 = virt_to_phys(vmbus_connection.monitor_pages[0]);
 	msg->monitor_page2 = virt_to_phys(vmbus_connection.monitor_pages[1]);
-	/*
-	 * We want all channel messages to be delivered on CPU 0.
-	 * This has been the behavior pre-win8. This is not
-	 * perf issue and having all channel messages delivered on CPU 0
-	 * would be ok.
-	 */
-	msg->target_vcpu = 0;
+	if (version >= VERSION_WIN8_1) {
+		msg->target_vcpu = hv_context.vp_index[get_cpu()];
+		put_cpu();
+	}
 
 	/*
 	 * Add to list before we send the request since we may
@@ -149,7 +146,7 @@ int vmbus_connect(void)
 	spin_lock_init(&vmbus_connection.channelmsg_lock);
 
 	INIT_LIST_HEAD(&vmbus_connection.chn_list);
-	mutex_init(&vmbus_connection.channel_mutex);
+	spin_lock_init(&vmbus_connection.channel_lock);
 
 	/*
 	 * Setup the vmbus event connection for channel interrupt
@@ -285,10 +282,11 @@ struct vmbus_channel *relid2channel(u32 relid)
 {
 	struct vmbus_channel *channel;
 	struct vmbus_channel *found_channel  = NULL;
+	unsigned long flags;
 	struct list_head *cur, *tmp;
 	struct vmbus_channel *cur_sc;
 
-	mutex_lock(&vmbus_connection.channel_mutex);
+	spin_lock_irqsave(&vmbus_connection.channel_lock, flags);
 	list_for_each_entry(channel, &vmbus_connection.chn_list, listentry) {
 		if (channel->offermsg.child_relid == relid) {
 			found_channel = channel;
@@ -307,7 +305,7 @@ struct vmbus_channel *relid2channel(u32 relid)
 			}
 		}
 	}
-	mutex_unlock(&vmbus_connection.channel_mutex);
+	spin_unlock_irqrestore(&vmbus_connection.channel_lock, flags);
 
 	return found_channel;
 }

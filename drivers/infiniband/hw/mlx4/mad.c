@@ -40,7 +40,6 @@
 #include <linux/gfp.h>
 #include <rdma/ib_pma.h>
 
-#include <linux/mlx4/driver.h>
 #include "mlx4_ib.h"
 
 enum {
@@ -607,8 +606,8 @@ static int mlx4_ib_demux_mad(struct ib_device *ibdev, u8 port,
 			struct ib_mad *mad)
 {
 	struct mlx4_ib_dev *dev = to_mdev(ibdev);
-	int err, other_port;
-	int slave = -1;
+	int err;
+	int slave;
 	u8 *slave_id;
 	int is_eth = 0;
 
@@ -626,17 +625,7 @@ static int mlx4_ib_demux_mad(struct ib_device *ibdev, u8 port,
 			mlx4_ib_warn(ibdev, "RoCE mgmt class is not CM\n");
 			return -EINVAL;
 		}
-		err = mlx4_get_slave_from_roce_gid(dev->dev, port, grh->dgid.raw, &slave);
-		if (err && mlx4_is_mf_bonded(dev->dev)) {
-			other_port = (port == 1) ? 2 : 1;
-			err = mlx4_get_slave_from_roce_gid(dev->dev, other_port, grh->dgid.raw, &slave);
-			if (!err) {
-				port = other_port;
-				pr_debug("resolved slave %d from gid %pI6 wire port %d other %d\n",
-					 slave, grh->dgid.raw, port, other_port);
-			}
-		}
-		if (err) {
+		if (mlx4_get_slave_from_roce_gid(dev->dev, port, grh->dgid.raw, &slave)) {
 			mlx4_ib_warn(ibdev, "failed matching grh\n");
 			return -ENOENT;
 		}
@@ -817,48 +806,17 @@ static int ib_process_mad(struct ib_device *ibdev, int mad_flags, u8 port_num,
 	return IB_MAD_RESULT_SUCCESS | IB_MAD_RESULT_REPLY;
 }
 
-static void edit_counter(struct mlx4_counter *cnt, void *counters,
-			 __be16 attr_id)
+static void edit_counter(struct mlx4_counter *cnt,
+					struct ib_pma_portcounters *pma_cnt)
 {
-	switch (attr_id) {
-	case IB_PMA_PORT_COUNTERS:
-	{
-		struct ib_pma_portcounters *pma_cnt =
-			(struct ib_pma_portcounters *)counters;
-
-		ASSIGN_32BIT_COUNTER(pma_cnt->port_xmit_data,
-				     (be64_to_cpu(cnt->tx_bytes) >> 2));
-		ASSIGN_32BIT_COUNTER(pma_cnt->port_rcv_data,
-				     (be64_to_cpu(cnt->rx_bytes) >> 2));
-		ASSIGN_32BIT_COUNTER(pma_cnt->port_xmit_packets,
-				     be64_to_cpu(cnt->tx_frames));
-		ASSIGN_32BIT_COUNTER(pma_cnt->port_rcv_packets,
-				     be64_to_cpu(cnt->rx_frames));
-		break;
-	}
-	case IB_PMA_PORT_COUNTERS_EXT:
-	{
-		struct ib_pma_portcounters_ext *pma_cnt_ext =
-			(struct ib_pma_portcounters_ext *)counters;
-
-		pma_cnt_ext->port_xmit_data =
-			cpu_to_be64(be64_to_cpu(cnt->tx_bytes) >> 2);
-		pma_cnt_ext->port_rcv_data =
-			cpu_to_be64(be64_to_cpu(cnt->rx_bytes) >> 2);
-		pma_cnt_ext->port_xmit_packets = cnt->tx_frames;
-		pma_cnt_ext->port_rcv_packets = cnt->rx_frames;
-		break;
-	}
-	}
-}
-
-static int iboe_process_mad_port_info(void *out_mad)
-{
-	struct ib_class_port_info cpi = {};
-
-	cpi.capability_mask = IB_PMA_CLASS_CAP_EXT_WIDTH;
-	memcpy(out_mad, &cpi, sizeof(cpi));
-	return IB_MAD_RESULT_SUCCESS | IB_MAD_RESULT_REPLY;
+	ASSIGN_32BIT_COUNTER(pma_cnt->port_xmit_data,
+			     (be64_to_cpu(cnt->tx_bytes) >> 2));
+	ASSIGN_32BIT_COUNTER(pma_cnt->port_rcv_data,
+			     (be64_to_cpu(cnt->rx_bytes) >> 2));
+	ASSIGN_32BIT_COUNTER(pma_cnt->port_xmit_packets,
+			     be64_to_cpu(cnt->tx_frames));
+	ASSIGN_32BIT_COUNTER(pma_cnt->port_rcv_packets,
+			     be64_to_cpu(cnt->rx_frames));
 }
 
 static int iboe_process_mad(struct ib_device *ibdev, int mad_flags, u8 port_num,
@@ -872,9 +830,6 @@ static int iboe_process_mad(struct ib_device *ibdev, int mad_flags, u8 port_num,
 
 	if (in_mad->mad_hdr.mgmt_class != IB_MGMT_CLASS_PERF_MGMT)
 		return -EINVAL;
-
-	if (in_mad->mad_hdr.attr_id == IB_PMA_CLASS_PORT_INFO)
-		return iboe_process_mad_port_info((void *)(out_mad->data + 40));
 
 	memset(&counter_stats, 0, sizeof(counter_stats));
 	mutex_lock(&dev->counters_table[port_num - 1].mutex);
@@ -897,8 +852,7 @@ static int iboe_process_mad(struct ib_device *ibdev, int mad_flags, u8 port_num,
 		switch (counter_stats.counter_mode & 0xf) {
 		case 0:
 			edit_counter(&counter_stats,
-				     (void *)(out_mad->data + 40),
-				     in_mad->mad_hdr.attr_id);
+				     (void *)(out_mad->data + 40));
 			err = IB_MAD_RESULT_SUCCESS | IB_MAD_RESULT_REPLY;
 			break;
 		default:
@@ -929,10 +883,8 @@ int mlx4_ib_process_mad(struct ib_device *ibdev, int mad_flags, u8 port_num,
 	 */
 	if (link == IB_LINK_LAYER_INFINIBAND) {
 		if (mlx4_is_slave(dev->dev) &&
-		    (in_mad->mad_hdr.mgmt_class == IB_MGMT_CLASS_PERF_MGMT &&
-		     (in_mad->mad_hdr.attr_id == IB_PMA_PORT_COUNTERS ||
-		      in_mad->mad_hdr.attr_id == IB_PMA_PORT_COUNTERS_EXT ||
-		      in_mad->mad_hdr.attr_id == IB_PMA_CLASS_PORT_INFO)))
+		    in_mad->mad_hdr.mgmt_class == IB_MGMT_CLASS_PERF_MGMT &&
+		    in_mad->mad_hdr.attr_id == IB_PMA_PORT_COUNTERS)
 			return iboe_process_mad(ibdev, mad_flags, port_num, in_wc,
 						in_grh, in_mad, out_mad);
 

@@ -123,7 +123,7 @@ static int ocfs2_global_is_id(void *dp, struct dquot *dquot)
 		      dquot->dq_id);
 }
 
-const struct qtree_fmt_operations ocfs2_global_ops = {
+struct qtree_fmt_operations ocfs2_global_ops = {
 	.mem2disk_dqblk = ocfs2_global_mem2diskdqb,
 	.disk2mem_dqblk = ocfs2_global_disk2memdqb,
 	.is_id = ocfs2_global_is_id,
@@ -308,7 +308,7 @@ int ocfs2_lock_global_qf(struct ocfs2_mem_dqinfo *oinfo, int ex)
 		WARN_ON(bh != oinfo->dqi_gqi_bh);
 	spin_unlock(&dq_data_lock);
 	if (ex) {
-		inode_lock(oinfo->dqi_gqinode);
+		mutex_lock(&oinfo->dqi_gqinode->i_mutex);
 		down_write(&OCFS2_I(oinfo->dqi_gqinode)->ip_alloc_sem);
 	} else {
 		down_read(&OCFS2_I(oinfo->dqi_gqinode)->ip_alloc_sem);
@@ -320,7 +320,7 @@ void ocfs2_unlock_global_qf(struct ocfs2_mem_dqinfo *oinfo, int ex)
 {
 	if (ex) {
 		up_write(&OCFS2_I(oinfo->dqi_gqinode)->ip_alloc_sem);
-		inode_unlock(oinfo->dqi_gqinode);
+		mutex_unlock(&oinfo->dqi_gqinode->i_mutex);
 	} else {
 		up_read(&OCFS2_I(oinfo->dqi_gqinode)->ip_alloc_sem);
 	}

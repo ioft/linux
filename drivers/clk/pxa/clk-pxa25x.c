@@ -17,6 +17,7 @@
 #include <linux/clkdev.h>
 #include <linux/io.h>
 #include <linux/of.h>
+#include <mach/pxa25x.h>
 #include <mach/pxa2xx-regs.h>
 
 #include <dt-bindings/clock/pxa-clock.h>

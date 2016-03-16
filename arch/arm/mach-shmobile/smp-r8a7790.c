@@ -60,7 +60,7 @@ static void __init r8a7790_smp_prepare_cpus(unsigned int max_cpus)
 	rcar_sysc_power_up(&r8a7790_ca7_scu);
 }
 
-const struct smp_operations r8a7790_smp_ops __initconst = {
+struct smp_operations r8a7790_smp_ops __initdata = {
 	.smp_prepare_cpus	= r8a7790_smp_prepare_cpus,
 	.smp_boot_secondary	= shmobile_smp_apmu_boot_secondary,
 #ifdef CONFIG_HOTPLUG_CPU

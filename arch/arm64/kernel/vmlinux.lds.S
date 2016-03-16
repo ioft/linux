@@ -113,6 +113,7 @@ SECTIONS
 		*(.got)			/* Global offset table		*/
 	}
 
+	ALIGN_DEBUG_RO
 	RO_DATA(PAGE_SIZE)
 	EXCEPTION_TABLE(8)
 	NOTES
@@ -127,6 +128,7 @@ SECTIONS
 		ARM_EXIT_KEEP(EXIT_TEXT)
 	}
 
+	ALIGN_DEBUG_RO_MIN(16)
 	.init.data : {
 		INIT_DATA
 		INIT_SETUP(16)
@@ -141,6 +143,9 @@ SECTIONS
 
 	PERCPU_SECTION(L1_CACHE_BYTES)
 
+	. = ALIGN(PAGE_SIZE);
+	__init_end = .;
+
 	. = ALIGN(4);
 	.altinstructions : {
 		__alt_instructions = .;
@@ -152,8 +157,6 @@ SECTIONS
 	}
 
 	. = ALIGN(PAGE_SIZE);
-	__init_end = .;
-
 	_data = .;
 	_sdata = .;
 	RW_DATA_SECTION(L1_CACHE_BYTES, PAGE_SIZE, THREAD_SIZE)

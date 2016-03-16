@@ -520,10 +520,13 @@ static inline int ref_for_same_block(struct __prelim_ref *ref1,
 static int __add_missing_keys(struct btrfs_fs_info *fs_info,
 			      struct list_head *head)
 {
-	struct __prelim_ref *ref;
+	struct list_head *pos;
 	struct extent_buffer *eb;
 
-	list_for_each_entry(ref, head, list) {
+	list_for_each(pos, head) {
+		struct __prelim_ref *ref;
+		ref = list_entry(pos, struct __prelim_ref, list);
+
 		if (ref->parent)
 			continue;
 		if (ref->key_for_search.type)
@@ -560,14 +563,22 @@ static int __add_missing_keys(struct btrfs_fs_info *fs_info,
  */
 static void __merge_refs(struct list_head *head, int mode)
 {
-	struct __prelim_ref *pos1;
+	struct list_head *pos1;
 
-	list_for_each_entry(pos1, head, list) {
-		struct __prelim_ref *pos2 = pos1, *tmp;
+	list_for_each(pos1, head) {
+		struct list_head *n2;
+		struct list_head *pos2;
+		struct __prelim_ref *ref1;
 
-		list_for_each_entry_safe_continue(pos2, tmp, head, list) {
-			struct __prelim_ref *xchg, *ref1 = pos1, *ref2 = pos2;
+		ref1 = list_entry(pos1, struct __prelim_ref, list);
+
+		for (pos2 = pos1->next, n2 = pos2->next; pos2 != head;
+		     pos2 = n2, n2 = pos2->next) {
+			struct __prelim_ref *ref2;
+			struct __prelim_ref *xchg;
 			struct extent_inode_elem *eie;
+
+			ref2 = list_entry(pos2, struct __prelim_ref, list);
 
 			if (!ref_for_same_block(ref1, ref2))
 				continue;
@@ -1406,8 +1417,7 @@ char *btrfs_ref_to_path(struct btrfs_root *fs_root, struct btrfs_path *path,
 			read_extent_buffer(eb, dest + bytes_left,
 					   name_off, name_len);
 		if (eb != eb_in) {
-			if (!path->skip_locking)
-				btrfs_tree_read_unlock_blocking(eb);
+			btrfs_tree_read_unlock_blocking(eb);
 			free_extent_buffer(eb);
 		}
 		ret = btrfs_find_item(fs_root, path, parent, 0,
@@ -1427,10 +1437,9 @@ char *btrfs_ref_to_path(struct btrfs_root *fs_root, struct btrfs_path *path,
 		eb = path->nodes[0];
 		/* make sure we can use eb after releasing the path */
 		if (eb != eb_in) {
-			if (!path->skip_locking)
-				btrfs_set_lock_blocking_rw(eb, BTRFS_READ_LOCK);
-			path->nodes[0] = NULL;
-			path->locks[0] = 0;
+			atomic_inc(&eb->refs);
+			btrfs_tree_read_lock(eb);
+			btrfs_set_lock_blocking_rw(eb, BTRFS_READ_LOCK);
 		}
 		btrfs_release_path(path);
 		iref = btrfs_item_ptr(eb, slot, struct btrfs_inode_ref);

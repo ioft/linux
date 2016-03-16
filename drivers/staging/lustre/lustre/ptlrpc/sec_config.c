@@ -27,7 +27,7 @@
  * Copyright (c) 2008, 2010, Oracle and/or its affiliates. All rights reserved.
  * Use is subject to license terms.
  *
- * Copyright (c) 2011, 2015, Intel Corporation.
+ * Copyright (c) 2011, 2012, Intel Corporation.
  */
 /*
  * This file is part of Lustre, http://www.lustre.org/
@@ -83,7 +83,8 @@ int sptlrpc_parse_flavor(const char *str, struct sptlrpc_flavor *flvr)
 		return 0;
 	}
 
-	strlcpy(buf, str, sizeof(buf));
+	strncpy(buf, str, sizeof(buf));
+	buf[sizeof(buf) - 1] = '\0';
 
 	bulk = strchr(buf, '-');
 	if (bulk)

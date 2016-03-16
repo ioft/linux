@@ -36,7 +36,6 @@
 #include <linux/init.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
-#include <linux/crc32c.h>
 
 static struct crypto_shash *tfm;
 
@@ -75,4 +74,3 @@ module_exit(libcrc32c_mod_fini);
 MODULE_AUTHOR("Clay Haapala <chaapala@cisco.com>");
 MODULE_DESCRIPTION("CRC32c (Castagnoli) calculations");
 MODULE_LICENSE("GPL");
-MODULE_SOFTDEP("pre: crc32c");

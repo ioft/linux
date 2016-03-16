@@ -37,11 +37,8 @@ static inline int ieee754sp_isnan(union ieee754sp x)
 
 static inline int ieee754sp_issnan(union ieee754sp x)
 {
-	int qbit;
-
 	assert(ieee754sp_isnan(x));
-	qbit = (SPMANT(x) & SP_MBIT(SP_FBITS - 1)) == SP_MBIT(SP_FBITS - 1);
-	return ieee754_csr.nan2008 ^ qbit;
+	return SPMANT(x) & SP_MBIT(SP_FBITS - 1);
 }
 
 
@@ -54,12 +51,7 @@ union ieee754sp __cold ieee754sp_nanxcpt(union ieee754sp r)
 	assert(ieee754sp_issnan(r));
 
 	ieee754_setcx(IEEE754_INVALID_OPERATION);
-	if (ieee754_csr.nan2008)
-		SPMANT(r) |= SP_MBIT(SP_FBITS - 1);
-	else
-		r = ieee754sp_indef();
-
-	return r;
+	return ieee754sp_indef();
 }
 
 static unsigned ieee754sp_get_rounding(int sn, unsigned xm)

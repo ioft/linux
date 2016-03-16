@@ -472,10 +472,9 @@ static DEFINE_MUTEX(smi_watchers_mutex);
 #define ipmi_get_stat(intf, stat) \
 	((unsigned int) atomic_read(&(intf)->stats[IPMI_STAT_ ## stat]))
 
-static const char * const addr_src_to_str[] = {
-	"invalid", "hotmod", "hardcoded", "SPMI", "ACPI", "SMBIOS", "PCI",
-	"device-tree", "default"
-};
+static char *addr_src_to_str[] = { "invalid", "hotmod", "hardcoded", "SPMI",
+				   "ACPI", "SMBIOS", "PCI",
+				   "device-tree", "default" };
 
 const char *ipmi_addr_src_to_str(enum ipmi_addr_src src)
 {

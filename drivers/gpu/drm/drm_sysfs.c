@@ -167,35 +167,47 @@ static ssize_t status_store(struct device *device,
 {
 	struct drm_connector *connector = to_drm_connector(device);
 	struct drm_device *dev = connector->dev;
-	enum drm_connector_force old_force;
+	enum drm_connector_status old_status;
 	int ret;
 
 	ret = mutex_lock_interruptible(&dev->mode_config.mutex);
 	if (ret)
 		return ret;
 
-	old_force = connector->force;
+	old_status = connector->status;
 
-	if (sysfs_streq(buf, "detect"))
+	if (sysfs_streq(buf, "detect")) {
 		connector->force = 0;
-	else if (sysfs_streq(buf, "on"))
+		connector->status = connector->funcs->detect(connector, true);
+	} else if (sysfs_streq(buf, "on")) {
 		connector->force = DRM_FORCE_ON;
-	else if (sysfs_streq(buf, "on-digital"))
+	} else if (sysfs_streq(buf, "on-digital")) {
 		connector->force = DRM_FORCE_ON_DIGITAL;
-	else if (sysfs_streq(buf, "off"))
+	} else if (sysfs_streq(buf, "off")) {
 		connector->force = DRM_FORCE_OFF;
-	else
+	} else
 		ret = -EINVAL;
 
-	if (old_force != connector->force || !connector->force) {
-		DRM_DEBUG_KMS("[CONNECTOR:%d:%s] force updated from %d to %d or reprobing\n",
+	if (ret == 0 && connector->force) {
+		if (connector->force == DRM_FORCE_ON ||
+		    connector->force == DRM_FORCE_ON_DIGITAL)
+			connector->status = connector_status_connected;
+		else
+			connector->status = connector_status_disconnected;
+		if (connector->funcs->force)
+			connector->funcs->force(connector);
+	}
+
+	if (old_status != connector->status) {
+		DRM_DEBUG_KMS("[CONNECTOR:%d:%s] status updated from %d to %d\n",
 			      connector->base.id,
 			      connector->name,
-			      old_force, connector->force);
+			      old_status, connector->status);
 
-		connector->funcs->fill_modes(connector,
-					     dev->mode_config.max_width,
-					     dev->mode_config.max_height);
+		dev->mode_config.delayed_event = true;
+		if (dev->mode_config.poll_enabled)
+			schedule_delayed_work(&dev->mode_config.output_poll_work,
+					      0);
 	}
 
 	mutex_unlock(&dev->mode_config.mutex);
@@ -240,33 +252,27 @@ static ssize_t edid_show(struct file *filp, struct kobject *kobj,
 			 struct bin_attribute *attr, char *buf, loff_t off,
 			 size_t count)
 {
-	struct device *connector_dev = kobj_to_dev(kobj);
+	struct device *connector_dev = container_of(kobj, struct device, kobj);
 	struct drm_connector *connector = to_drm_connector(connector_dev);
 	unsigned char *edid;
 	size_t size;
-	ssize_t ret = 0;
 
-	mutex_lock(&connector->dev->mode_config.mutex);
 	if (!connector->edid_blob_ptr)
-		goto unlock;
+		return 0;
 
 	edid = connector->edid_blob_ptr->data;
 	size = connector->edid_blob_ptr->length;
 	if (!edid)
-		goto unlock;
+		return 0;
 
 	if (off >= size)
-		goto unlock;
+		return 0;
 
 	if (off + count > size)
 		count = size - off;
 	memcpy(buf, edid + off, count);
 
-	ret = count;
-unlock:
-	mutex_unlock(&connector->dev->mode_config.mutex);
-
-	return ret;
+	return count;
 }
 
 static ssize_t modes_show(struct device *device,
@@ -277,12 +283,10 @@ static ssize_t modes_show(struct device *device,
 	struct drm_display_mode *mode;
 	int written = 0;
 
-	mutex_lock(&connector->dev->mode_config.mutex);
 	list_for_each_entry(mode, &connector->modes, head) {
 		written += snprintf(buf + written, PAGE_SIZE - written, "%s\n",
 				    mode->name);
 	}
-	mutex_unlock(&connector->dev->mode_config.mutex);
 
 	return written;
 }

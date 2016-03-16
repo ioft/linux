@@ -45,9 +45,6 @@ struct snd_dice {
 	spinlock_t lock;
 	struct mutex mutex;
 
-	bool registered;
-	struct delayed_work dwork;
-
 	/* Offsets for sub-addresses */
 	unsigned int global_offset;
 	unsigned int rx_offset;

@@ -25,7 +25,7 @@
 #include <linux/io.h>
 #include <linux/usb.h>
 #include <linux/usb/hcd.h>
-#include <soc/fsl/qe/qe.h>
+#include <asm/qe.h>
 #include <asm/fsl_gtm.h>
 #include "fhci.h"
 

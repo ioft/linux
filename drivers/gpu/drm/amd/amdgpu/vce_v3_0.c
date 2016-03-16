@@ -103,108 +103,6 @@ static void vce_v3_0_ring_set_wptr(struct amdgpu_ring *ring)
 		WREG32(mmVCE_RB_WPTR2, ring->wptr);
 }
 
-static void vce_v3_0_override_vce_clock_gating(struct amdgpu_device *adev, bool override)
-{
-	u32 tmp, data;
-
-	tmp = data = RREG32(mmVCE_RB_ARB_CTRL);
-	if (override)
-		data |= VCE_RB_ARB_CTRL__VCE_CGTT_OVERRIDE_MASK;
-	else
-		data &= ~VCE_RB_ARB_CTRL__VCE_CGTT_OVERRIDE_MASK;
-
-	if (tmp != data)
-		WREG32(mmVCE_RB_ARB_CTRL, data);
-}
-
-static void vce_v3_0_set_vce_sw_clock_gating(struct amdgpu_device *adev,
-					     bool gated)
-{
-	u32 tmp, data;
-	/* Set Override to disable Clock Gating */
-	vce_v3_0_override_vce_clock_gating(adev, true);
-
-	if (!gated) {
-		/* Force CLOCK ON for VCE_CLOCK_GATING_B,
-		 * {*_FORCE_ON, *_FORCE_OFF} = {1, 0}
-		 * VREG can be FORCE ON or set to Dynamic, but can't be OFF
-		 */
-		tmp = data = RREG32(mmVCE_CLOCK_GATING_B);
-		data |= 0x1ff;
-		data &= ~0xef0000;
-		if (tmp != data)
-			WREG32(mmVCE_CLOCK_GATING_B, data);
-
-		/* Force CLOCK ON for VCE_UENC_CLOCK_GATING,
-		 * {*_FORCE_ON, *_FORCE_OFF} = {1, 0}
-		 */
-		tmp = data = RREG32(mmVCE_UENC_CLOCK_GATING);
-		data |= 0x3ff000;
-		data &= ~0xffc00000;
-		if (tmp != data)
-			WREG32(mmVCE_UENC_CLOCK_GATING, data);
-
-		/* set VCE_UENC_CLOCK_GATING_2 */
-		tmp = data = RREG32(mmVCE_UENC_CLOCK_GATING_2);
-		data |= 0x2;
-		data &= ~0x2;
-		if (tmp != data)
-			WREG32(mmVCE_UENC_CLOCK_GATING_2, data);
-
-		/* Force CLOCK ON for VCE_UENC_REG_CLOCK_GATING */
-		tmp = data = RREG32(mmVCE_UENC_REG_CLOCK_GATING);
-		data |= 0x37f;
-		if (tmp != data)
-			WREG32(mmVCE_UENC_REG_CLOCK_GATING, data);
-
-		/* Force VCE_UENC_DMA_DCLK_CTRL Clock ON */
-		tmp = data = RREG32(mmVCE_UENC_DMA_DCLK_CTRL);
-		data |= VCE_UENC_DMA_DCLK_CTRL__WRDMCLK_FORCEON_MASK |
-				VCE_UENC_DMA_DCLK_CTRL__RDDMCLK_FORCEON_MASK |
-				VCE_UENC_DMA_DCLK_CTRL__REGCLK_FORCEON_MASK  |
-				0x8;
-		if (tmp != data)
-			WREG32(mmVCE_UENC_DMA_DCLK_CTRL, data);
-	} else {
-		/* Force CLOCK OFF for VCE_CLOCK_GATING_B,
-		 * {*, *_FORCE_OFF} = {*, 1}
-		 * set VREG to Dynamic, as it can't be OFF
-		 */
-		tmp = data = RREG32(mmVCE_CLOCK_GATING_B);
-		data &= ~0x80010;
-		data |= 0xe70008;
-		if (tmp != data)
-			WREG32(mmVCE_CLOCK_GATING_B, data);
-		/* Force CLOCK OFF for VCE_UENC_CLOCK_GATING,
-		 * Force ClOCK OFF takes precedent over Force CLOCK ON setting.
-		 * {*_FORCE_ON, *_FORCE_OFF} = {*, 1}
-		 */
-		tmp = data = RREG32(mmVCE_UENC_CLOCK_GATING);
-		data |= 0xffc00000;
-		if (tmp != data)
-			WREG32(mmVCE_UENC_CLOCK_GATING, data);
-		/* Set VCE_UENC_CLOCK_GATING_2 */
-		tmp = data = RREG32(mmVCE_UENC_CLOCK_GATING_2);
-		data |= 0x10000;
-		if (tmp != data)
-			WREG32(mmVCE_UENC_CLOCK_GATING_2, data);
-		/* Set VCE_UENC_REG_CLOCK_GATING to dynamic */
-		tmp = data = RREG32(mmVCE_UENC_REG_CLOCK_GATING);
-		data &= ~0xffc00000;
-		if (tmp != data)
-			WREG32(mmVCE_UENC_REG_CLOCK_GATING, data);
-		/* Set VCE_UENC_DMA_DCLK_CTRL CG always in dynamic mode */
-		tmp = data = RREG32(mmVCE_UENC_DMA_DCLK_CTRL);
-		data &= ~(VCE_UENC_DMA_DCLK_CTRL__WRDMCLK_FORCEON_MASK |
-				VCE_UENC_DMA_DCLK_CTRL__RDDMCLK_FORCEON_MASK |
-				VCE_UENC_DMA_DCLK_CTRL__REGCLK_FORCEON_MASK  |
-				0x8);
-		if (tmp != data)
-			WREG32(mmVCE_UENC_DMA_DCLK_CTRL, data);
-	}
-	vce_v3_0_override_vce_clock_gating(adev, false);
-}
-
 /**
  * vce_v3_0_start - start VCE block
  *
@@ -223,7 +121,7 @@ static int vce_v3_0_start(struct amdgpu_device *adev)
 		if (adev->vce.harvest_config & (1 << idx))
 			continue;
 
-		if (idx == 0)
+		if(idx == 0)
 			WREG32_P(mmGRBM_GFX_INDEX, 0,
 				~GRBM_GFX_INDEX__VCE_INSTANCE_MASK);
 		else
@@ -276,10 +174,6 @@ static int vce_v3_0_start(struct amdgpu_device *adev)
 		/* clear BUSY flag */
 		WREG32_P(mmVCE_STATUS, 0, ~1);
 
-		/* Set Clock-Gating off */
-		if (adev->cg_flags & AMD_CG_SUPPORT_VCE_MGCG)
-			vce_v3_0_set_vce_sw_clock_gating(adev, false);
-
 		if (r) {
 			DRM_ERROR("VCE not responding, giving up!!!\n");
 			mutex_unlock(&adev->grbm_idx_mutex);
@@ -314,11 +208,14 @@ static int vce_v3_0_start(struct amdgpu_device *adev)
 static unsigned vce_v3_0_get_harvest_config(struct amdgpu_device *adev)
 {
 	u32 tmp;
+	unsigned ret;
 
 	/* Fiji, Stoney are single pipe */
 	if ((adev->asic_type == CHIP_FIJI) ||
-	    (adev->asic_type == CHIP_STONEY))
-		return AMDGPU_VCE_HARVEST_VCE1;
+	    (adev->asic_type == CHIP_STONEY)){
+		ret = AMDGPU_VCE_HARVEST_VCE1;
+		return ret;
+	}
 
 	/* Tonga and CZ are dual or single pipe */
 	if (adev->flags & AMD_IS_APU)
@@ -332,14 +229,19 @@ static unsigned vce_v3_0_get_harvest_config(struct amdgpu_device *adev)
 
 	switch (tmp) {
 	case 1:
-		return AMDGPU_VCE_HARVEST_VCE0;
+		ret = AMDGPU_VCE_HARVEST_VCE0;
+		break;
 	case 2:
-		return AMDGPU_VCE_HARVEST_VCE1;
+		ret = AMDGPU_VCE_HARVEST_VCE1;
+		break;
 	case 3:
-		return AMDGPU_VCE_HARVEST_VCE0 | AMDGPU_VCE_HARVEST_VCE1;
+		ret = AMDGPU_VCE_HARVEST_VCE0 | AMDGPU_VCE_HARVEST_VCE1;
+		break;
 	default:
-		return 0;
+		ret = 0;
 	}
+
+	return ret;
 }
 
 static int vce_v3_0_early_init(void *handle)
@@ -414,22 +316,28 @@ static int vce_v3_0_sw_fini(void *handle)
 
 static int vce_v3_0_hw_init(void *handle)
 {
-	int r, i;
+	struct amdgpu_ring *ring;
+	int r;
 	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
 
 	r = vce_v3_0_start(adev);
 	if (r)
 		return r;
 
-	adev->vce.ring[0].ready = false;
-	adev->vce.ring[1].ready = false;
+	ring = &adev->vce.ring[0];
+	ring->ready = true;
+	r = amdgpu_ring_test_ring(ring);
+	if (r) {
+		ring->ready = false;
+		return r;
+	}
 
-	for (i = 0; i < 2; i++) {
-		r = amdgpu_ring_test_ring(&adev->vce.ring[i]);
-		if (r)
-			return r;
-		else
-			adev->vce.ring[i].ready = true;
+	ring = &adev->vce.ring[1];
+	ring->ready = true;
+	r = amdgpu_ring_test_ring(ring);
+	if (r) {
+		ring->ready = false;
+		return r;
 	}
 
 	DRM_INFO("VCE initialized successfully.\n");
@@ -529,9 +437,17 @@ static bool vce_v3_0_is_idle(void *handle)
 {
 	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
 	u32 mask = 0;
+	int idx;
 
-	mask |= (adev->vce.harvest_config & AMDGPU_VCE_HARVEST_VCE0) ? 0 : SRBM_STATUS2__VCE0_BUSY_MASK;
-	mask |= (adev->vce.harvest_config & AMDGPU_VCE_HARVEST_VCE1) ? 0 : SRBM_STATUS2__VCE1_BUSY_MASK;
+	for (idx = 0; idx < 2; ++idx) {
+		if (adev->vce.harvest_config & (1 << idx))
+			continue;
+
+		if (idx == 0)
+			mask |= SRBM_STATUS2__VCE0_BUSY_MASK;
+		else
+			mask |= SRBM_STATUS2__VCE1_BUSY_MASK;
+	}
 
 	return !(RREG32(mmSRBM_STATUS2) & mask);
 }
@@ -540,11 +456,23 @@ static int vce_v3_0_wait_for_idle(void *handle)
 {
 	unsigned i;
 	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
+	u32 mask = 0;
+	int idx;
 
-	for (i = 0; i < adev->usec_timeout; i++)
-		if (vce_v3_0_is_idle(handle))
+	for (idx = 0; idx < 2; ++idx) {
+		if (adev->vce.harvest_config & (1 << idx))
+			continue;
+
+		if (idx == 0)
+			mask |= SRBM_STATUS2__VCE0_BUSY_MASK;
+		else
+			mask |= SRBM_STATUS2__VCE1_BUSY_MASK;
+	}
+
+	for (i = 0; i < adev->usec_timeout; i++) {
+		if (!(RREG32(mmSRBM_STATUS2) & mask))
 			return 0;
-
+	}
 	return -ETIMEDOUT;
 }
 
@@ -552,10 +480,17 @@ static int vce_v3_0_soft_reset(void *handle)
 {
 	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
 	u32 mask = 0;
+	int idx;
 
-	mask |= (adev->vce.harvest_config & AMDGPU_VCE_HARVEST_VCE0) ? 0 : SRBM_SOFT_RESET__SOFT_RESET_VCE0_MASK;
-	mask |= (adev->vce.harvest_config & AMDGPU_VCE_HARVEST_VCE1) ? 0 : SRBM_SOFT_RESET__SOFT_RESET_VCE1_MASK;
+	for (idx = 0; idx < 2; ++idx) {
+		if (adev->vce.harvest_config & (1 << idx))
+			continue;
 
+		if (idx == 0)
+			mask |= SRBM_SOFT_RESET__SOFT_RESET_VCE0_MASK;
+		else
+			mask |= SRBM_SOFT_RESET__SOFT_RESET_VCE1_MASK;
+	}
 	WREG32_P(mmSRBM_SOFT_RESET, mask,
 		 ~(SRBM_SOFT_RESET__SOFT_RESET_VCE0_MASK |
 		   SRBM_SOFT_RESET__SOFT_RESET_VCE1_MASK));
@@ -657,8 +592,10 @@ static int vce_v3_0_process_interrupt(struct amdgpu_device *adev,
 
 	switch (entry->src_data) {
 	case 0:
+		amdgpu_fence_process(&adev->vce.ring[0]);
+		break;
 	case 1:
-		amdgpu_fence_process(&adev->vce.ring[entry->src_data]);
+		amdgpu_fence_process(&adev->vce.ring[1]);
 		break;
 	default:
 		DRM_ERROR("Unhandled interrupt: %d %d\n",
@@ -672,47 +609,6 @@ static int vce_v3_0_process_interrupt(struct amdgpu_device *adev,
 static int vce_v3_0_set_clockgating_state(void *handle,
 					  enum amd_clockgating_state state)
 {
-	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
-	bool enable = (state == AMD_CG_STATE_GATE) ? true : false;
-	int i;
-
-	if (!(adev->cg_flags & AMD_CG_SUPPORT_VCE_MGCG))
-		return 0;
-
-	mutex_lock(&adev->grbm_idx_mutex);
-	for (i = 0; i < 2; i++) {
-		/* Program VCE Instance 0 or 1 if not harvested */
-		if (adev->vce.harvest_config & (1 << i))
-			continue;
-
-		if (i == 0)
-			WREG32_P(mmGRBM_GFX_INDEX, 0,
-					~GRBM_GFX_INDEX__VCE_INSTANCE_MASK);
-		else
-			WREG32_P(mmGRBM_GFX_INDEX,
-					GRBM_GFX_INDEX__VCE_INSTANCE_MASK,
-					~GRBM_GFX_INDEX__VCE_INSTANCE_MASK);
-
-		if (enable) {
-			/* initialize VCE_CLOCK_GATING_A: Clock ON/OFF delay */
-			uint32_t data = RREG32(mmVCE_CLOCK_GATING_A);
-			data &= ~(0xf | 0xff0);
-			data |= ((0x0 << 0) | (0x04 << 4));
-			WREG32(mmVCE_CLOCK_GATING_A, data);
-
-			/* initialize VCE_UENC_CLOCK_GATING: Clock ON/OFF delay */
-			data = RREG32(mmVCE_UENC_CLOCK_GATING);
-			data &= ~(0xf | 0xff0);
-			data |= ((0x0 << 0) | (0x04 << 4));
-			WREG32(mmVCE_UENC_CLOCK_GATING, data);
-		}
-
-		vce_v3_0_set_vce_sw_clock_gating(adev, enable);
-	}
-
-	WREG32_P(mmGRBM_GFX_INDEX, 0, ~GRBM_GFX_INDEX__VCE_INSTANCE_MASK);
-	mutex_unlock(&adev->grbm_idx_mutex);
-
 	return 0;
 }
 
@@ -727,9 +623,6 @@ static int vce_v3_0_set_powergating_state(void *handle,
 	 * the smc and the hw blocks
 	 */
 	struct amdgpu_device *adev = (struct amdgpu_device *)handle;
-
-	if (!(adev->pg_flags & AMD_PG_SUPPORT_VCE))
-		return 0;
 
 	if (state == AMD_PG_STATE_GATE)
 		/* XXX do we need a vce_v3_0_stop()? */

@@ -315,8 +315,6 @@ struct vgic_cpu {
 
 	/* Protected by the distributor's irq_phys_map_lock */
 	struct list_head	irq_phys_map_list;
-
-	u64		live_lrs;
 };
 
 #define LR_EMPTY	0xff

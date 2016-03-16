@@ -226,28 +226,11 @@ static int call_step_hook(struct pt_regs *regs, unsigned int esr)
 	return retval;
 }
 
-static void send_user_sigtrap(int si_code)
-{
-	struct pt_regs *regs = current_pt_regs();
-	siginfo_t info = {
-		.si_signo	= SIGTRAP,
-		.si_errno	= 0,
-		.si_code	= si_code,
-		.si_addr	= (void __user *)instruction_pointer(regs),
-	};
-
-	if (WARN_ON(!user_mode(regs)))
-		return;
-
-	if (interrupts_enabled(regs))
-		local_irq_enable();
-
-	force_sig_info(SIGTRAP, &info, current);
-}
-
 static int single_step_handler(unsigned long addr, unsigned int esr,
 			       struct pt_regs *regs)
 {
+	siginfo_t info;
+
 	/*
 	 * If we are stepping a pending breakpoint, call the hw_breakpoint
 	 * handler first.
@@ -256,7 +239,11 @@ static int single_step_handler(unsigned long addr, unsigned int esr,
 		return 0;
 
 	if (user_mode(regs)) {
-		send_user_sigtrap(TRAP_HWBKPT);
+		info.si_signo = SIGTRAP;
+		info.si_errno = 0;
+		info.si_code  = TRAP_HWBKPT;
+		info.si_addr  = (void __user *)instruction_pointer(regs);
+		force_sig_info(SIGTRAP, &info, current);
 
 		/*
 		 * ptrace will disable single step unless explicitly
@@ -320,8 +307,17 @@ static int call_break_hook(struct pt_regs *regs, unsigned int esr)
 static int brk_handler(unsigned long addr, unsigned int esr,
 		       struct pt_regs *regs)
 {
+	siginfo_t info;
+
 	if (user_mode(regs)) {
-		send_user_sigtrap(TRAP_BRKPT);
+		info = (siginfo_t) {
+			.si_signo = SIGTRAP,
+			.si_errno = 0,
+			.si_code  = TRAP_BRKPT,
+			.si_addr  = (void __user *)instruction_pointer(regs),
+		};
+
+		force_sig_info(SIGTRAP, &info, current);
 	} else if (call_break_hook(regs, esr) != DBG_HOOK_HANDLED) {
 		pr_warning("Unexpected kernel BRK exception at EL1\n");
 		return -EFAULT;
@@ -332,6 +328,7 @@ static int brk_handler(unsigned long addr, unsigned int esr,
 
 int aarch32_break_handler(struct pt_regs *regs)
 {
+	siginfo_t info;
 	u32 arm_instr;
 	u16 thumb_instr;
 	bool bp = false;
@@ -362,7 +359,14 @@ int aarch32_break_handler(struct pt_regs *regs)
 	if (!bp)
 		return -EFAULT;
 
-	send_user_sigtrap(TRAP_BRKPT);
+	info = (siginfo_t) {
+		.si_signo = SIGTRAP,
+		.si_errno = 0,
+		.si_code  = TRAP_BRKPT,
+		.si_addr  = pc,
+	};
+
+	force_sig_info(SIGTRAP, &info, current);
 	return 0;
 }
 

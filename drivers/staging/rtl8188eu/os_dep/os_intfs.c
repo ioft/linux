@@ -1100,7 +1100,7 @@ netdev_open_error:
 int rtw_ips_pwr_up(struct adapter *padapter)
 {
 	int result;
-	unsigned long start_time = jiffies;
+	u32 start_time = jiffies;
 
 	DBG_88E("===>  rtw_ips_pwr_up..............\n");
 	rtw_reset_drv_sw(padapter);
@@ -1109,14 +1109,13 @@ int rtw_ips_pwr_up(struct adapter *padapter)
 
 	rtw_led_control(padapter, LED_CTL_NO_LINK);
 
-	DBG_88E("<===  rtw_ips_pwr_up.............. in %dms\n",
-		jiffies_to_msecs(jiffies - start_time));
+	DBG_88E("<===  rtw_ips_pwr_up.............. in %dms\n", rtw_get_passing_time_ms(start_time));
 	return result;
 }
 
 void rtw_ips_pwr_down(struct adapter *padapter)
 {
-	unsigned long start_time = jiffies;
+	u32 start_time = jiffies;
 
 	DBG_88E("===> rtw_ips_pwr_down...................\n");
 
@@ -1125,8 +1124,7 @@ void rtw_ips_pwr_down(struct adapter *padapter)
 	rtw_led_control(padapter, LED_CTL_POWER_OFF);
 
 	rtw_ips_dev_unload(padapter);
-	DBG_88E("<=== rtw_ips_pwr_down..................... in %dms\n",
-		jiffies_to_msecs(jiffies - start_time));
+	DBG_88E("<=== rtw_ips_pwr_down..................... in %dms\n", rtw_get_passing_time_ms(start_time));
 }
 
 void rtw_ips_dev_unload(struct adapter *padapter)

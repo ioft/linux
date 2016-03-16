@@ -5,7 +5,7 @@
  ******************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2016, Intel Corp.
+ * Copyright (C) 2000 - 2015, Intel Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -45,10 +45,6 @@
 #include "accommon.h"
 #include "acdebug.h"
 
-#ifdef ACPI_APPLICATION
-#include "acapps.h"
-#endif
-
 #define _COMPONENT          ACPI_CA_DEBUGGER
 ACPI_MODULE_NAME("dbinput")
 
@@ -56,6 +52,8 @@ ACPI_MODULE_NAME("dbinput")
 static u32 acpi_db_get_line(char *input_buffer);
 
 static u32 acpi_db_match_command(char *user_command);
+
+static void acpi_db_single_thread(void);
 
 static void acpi_db_display_command_info(char *command, u8 display_all);
 
@@ -625,7 +623,9 @@ static u32 acpi_db_get_line(char *input_buffer)
 
 	/* Uppercase the actual command */
 
-	acpi_ut_strupr(acpi_gbl_db_args[0]);
+	if (acpi_gbl_db_args[0]) {
+		acpi_ut_strupr(acpi_gbl_db_args[0]);
+	}
 
 	count = i;
 	if (count) {
@@ -1050,17 +1050,11 @@ acpi_db_command_dispatch(char *input_buffer,
 		acpi_db_close_debug_file();
 		break;
 
-	case CMD_LOAD:{
-			struct acpi_new_table_desc *list_head = NULL;
+	case CMD_LOAD:
 
-			status =
-			    ac_get_all_tables_from_file(acpi_gbl_db_args[1],
-							ACPI_GET_ALL_TABLES,
-							&list_head);
-			if (ACPI_SUCCESS(status)) {
-				acpi_db_load_tables(list_head);
-			}
-		}
+		status =
+		    acpi_db_get_table_from_file(acpi_gbl_db_args[1], NULL,
+						FALSE);
 		break;
 
 	case CMD_OPEN:
@@ -1155,16 +1149,55 @@ acpi_db_command_dispatch(char *input_buffer,
 
 void ACPI_SYSTEM_XFACE acpi_db_execute_thread(void *context)
 {
+	acpi_status status = AE_OK;
+	acpi_status Mstatus;
 
-	(void)acpi_db_user_commands();
+	while (status != AE_CTRL_TERMINATE && !acpi_gbl_db_terminate_loop) {
+		acpi_gbl_method_executing = FALSE;
+		acpi_gbl_step_to_next_call = FALSE;
+
+		Mstatus = acpi_os_acquire_mutex(acpi_gbl_db_command_ready,
+						ACPI_WAIT_FOREVER);
+		if (ACPI_FAILURE(Mstatus)) {
+			return;
+		}
+
+		status =
+		    acpi_db_command_dispatch(acpi_gbl_db_line_buf, NULL, NULL);
+
+		acpi_os_release_mutex(acpi_gbl_db_command_complete);
+	}
 	acpi_gbl_db_threads_terminated = TRUE;
+}
+
+/*******************************************************************************
+ *
+ * FUNCTION:    acpi_db_single_thread
+ *
+ * PARAMETERS:  None
+ *
+ * RETURN:      None
+ *
+ * DESCRIPTION: Debugger execute thread. Waits for a command line, then
+ *              simply dispatches it.
+ *
+ ******************************************************************************/
+
+static void acpi_db_single_thread(void)
+{
+
+	acpi_gbl_method_executing = FALSE;
+	acpi_gbl_step_to_next_call = FALSE;
+
+	(void)acpi_db_command_dispatch(acpi_gbl_db_line_buf, NULL, NULL);
 }
 
 /*******************************************************************************
  *
  * FUNCTION:    acpi_db_user_commands
  *
- * PARAMETERS:  None
+ * PARAMETERS:  prompt              - User prompt (depends on mode)
+ *              op                  - Current executing parse op
  *
  * RETURN:      None
  *
@@ -1173,7 +1206,7 @@ void ACPI_SYSTEM_XFACE acpi_db_execute_thread(void *context)
  *
  ******************************************************************************/
 
-acpi_status acpi_db_user_commands(void)
+acpi_status acpi_db_user_commands(char prompt, union acpi_parse_object *op)
 {
 	acpi_status status = AE_OK;
 
@@ -1183,31 +1216,52 @@ acpi_status acpi_db_user_commands(void)
 
 	while (!acpi_gbl_db_terminate_loop) {
 
-		/* Wait the readiness of the command */
+		/* Force output to console until a command is entered */
 
-		status = acpi_os_wait_command_ready();
-		if (ACPI_FAILURE(status)) {
-			break;
+		acpi_db_set_output_destination(ACPI_DB_CONSOLE_OUTPUT);
+
+		/* Different prompt if method is executing */
+
+		if (!acpi_gbl_method_executing) {
+			acpi_os_printf("%1c ", ACPI_DEBUGGER_COMMAND_PROMPT);
+		} else {
+			acpi_os_printf("%1c ", ACPI_DEBUGGER_EXECUTE_PROMPT);
 		}
 
-		/* Just call to the command line interpreter */
+		/* Get the user input line */
 
-		acpi_gbl_method_executing = FALSE;
-		acpi_gbl_step_to_next_call = FALSE;
-
-		(void)acpi_db_command_dispatch(acpi_gbl_db_line_buf, NULL,
-					       NULL);
-
-		/* Notify the completion of the command */
-
-		status = acpi_os_notify_command_complete();
+		status = acpi_os_get_line(acpi_gbl_db_line_buf,
+					  ACPI_DB_LINE_BUFFER_SIZE, NULL);
 		if (ACPI_FAILURE(status)) {
-			break;
+			ACPI_EXCEPTION((AE_INFO, status,
+					"While parsing command line"));
+			return (status);
+		}
+
+		/* Check for single or multithreaded debug */
+
+		if (acpi_gbl_debugger_configuration & DEBUGGER_MULTI_THREADED) {
+			/*
+			 * Signal the debug thread that we have a command to execute,
+			 * and wait for the command to complete.
+			 */
+			acpi_os_release_mutex(acpi_gbl_db_command_ready);
+			if (ACPI_FAILURE(status)) {
+				return (status);
+			}
+
+			status =
+			    acpi_os_acquire_mutex(acpi_gbl_db_command_complete,
+						  ACPI_WAIT_FOREVER);
+			if (ACPI_FAILURE(status)) {
+				return (status);
+			}
+		} else {
+			/* Just call to the command line interpreter */
+
+			acpi_db_single_thread();
 		}
 	}
 
-	if (ACPI_FAILURE(status) && status != AE_CTRL_TERMINATE) {
-		ACPI_EXCEPTION((AE_INFO, status, "While parsing command line"));
-	}
 	return (status);
 }

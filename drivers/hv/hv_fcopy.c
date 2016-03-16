@@ -51,6 +51,7 @@ static struct {
 	struct hv_fcopy_hdr  *fcopy_msg; /* current message */
 	struct vmbus_channel *recv_channel; /* chn we got the request */
 	u64 recv_req_id; /* request ID. */
+	void *fcopy_context; /* for the channel callback */
 } fcopy_transaction;
 
 static void fcopy_respond_to_host(int error);
@@ -66,13 +67,6 @@ static struct hvutil_transport *hvt;
  */
 static int dm_reg_value;
 
-static void fcopy_poll_wrapper(void *channel)
-{
-	/* Transaction is finished, reset the state here to avoid races. */
-	fcopy_transaction.state = HVUTIL_READY;
-	hv_fcopy_onchannelcallback(channel);
-}
-
 static void fcopy_timeout_func(struct work_struct *dummy)
 {
 	/*
@@ -80,7 +74,13 @@ static void fcopy_timeout_func(struct work_struct *dummy)
 	 * process the pending transaction.
 	 */
 	fcopy_respond_to_host(HV_E_FAIL);
-	hv_poll_channel(fcopy_transaction.recv_channel, fcopy_poll_wrapper);
+
+	/* Transaction is finished, reset the state. */
+	if (fcopy_transaction.state > HVUTIL_READY)
+		fcopy_transaction.state = HVUTIL_READY;
+
+	hv_poll_channel(fcopy_transaction.fcopy_context,
+			hv_fcopy_onchannelcallback);
 }
 
 static int fcopy_handle_handshake(u32 version)
@@ -108,7 +108,9 @@ static int fcopy_handle_handshake(u32 version)
 		return -EINVAL;
 	}
 	pr_debug("FCP: userspace daemon ver. %d registered\n", version);
-	hv_poll_channel(fcopy_transaction.recv_channel, fcopy_poll_wrapper);
+	fcopy_transaction.state = HVUTIL_READY;
+	hv_poll_channel(fcopy_transaction.fcopy_context,
+			hv_fcopy_onchannelcallback);
 	return 0;
 }
 
@@ -225,8 +227,15 @@ void hv_fcopy_onchannelcallback(void *context)
 	int util_fw_version;
 	int fcopy_srv_version;
 
-	if (fcopy_transaction.state > HVUTIL_READY)
+	if (fcopy_transaction.state > HVUTIL_READY) {
+		/*
+		 * We will defer processing this callback once
+		 * the current transaction is complete.
+		 */
+		fcopy_transaction.fcopy_context = context;
 		return;
+	}
+	fcopy_transaction.fcopy_context = NULL;
 
 	vmbus_recvpacket(channel, recv_buffer, PAGE_SIZE * 2, &recvlen,
 			 &requestid);
@@ -266,8 +275,7 @@ void hv_fcopy_onchannelcallback(void *context)
 		 * Send the information to the user-level daemon.
 		 */
 		schedule_work(&fcopy_send_work);
-		schedule_delayed_work(&fcopy_timeout_work,
-				      HV_UTIL_TIMEOUT * HZ);
+		schedule_delayed_work(&fcopy_timeout_work, 5*HZ);
 		return;
 	}
 	icmsghdr->icflags = ICMSGHDRFLAG_TRANSACTION | ICMSGHDRFLAG_RESPONSE;
@@ -296,8 +304,9 @@ static int fcopy_on_msg(void *msg, int len)
 	if (cancel_delayed_work_sync(&fcopy_timeout_work)) {
 		fcopy_transaction.state = HVUTIL_USERSPACE_RECV;
 		fcopy_respond_to_host(*val);
-		hv_poll_channel(fcopy_transaction.recv_channel,
-				fcopy_poll_wrapper);
+		fcopy_transaction.state = HVUTIL_READY;
+		hv_poll_channel(fcopy_transaction.fcopy_context,
+				hv_fcopy_onchannelcallback);
 	}
 
 	return 0;

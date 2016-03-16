@@ -19,8 +19,7 @@ typedef struct {
 #endif
 
 	struct mutex lock;
-	void __user *vdso;			/* vdso base address */
-	const struct vdso_image *vdso_image;	/* vdso image in use */
+	void __user *vdso;
 
 	atomic_t perf_rdpmc_allowed;	/* nonzero if rdpmc is allowed */
 } mm_context_t;

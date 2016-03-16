@@ -40,8 +40,6 @@ struct s3c64xx_spi_info {
 	int num_cs;
 	int (*cfg_gpio)(void);
 	dma_filter_fn filter;
-	void *dma_tx;
-	void *dma_rx;
 };
 
 /**

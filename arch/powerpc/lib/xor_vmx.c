@@ -74,7 +74,6 @@ void xor_altivec_2(unsigned long bytes, unsigned long *v1_in,
 		v2 += 4;
 	} while (--lines > 0);
 
-	disable_kernel_altivec();
 	preempt_enable();
 }
 EXPORT_SYMBOL(xor_altivec_2);
@@ -103,7 +102,6 @@ void xor_altivec_3(unsigned long bytes, unsigned long *v1_in,
 		v3 += 4;
 	} while (--lines > 0);
 
-	disable_kernel_altivec();
 	preempt_enable();
 }
 EXPORT_SYMBOL(xor_altivec_3);
@@ -137,7 +135,6 @@ void xor_altivec_4(unsigned long bytes, unsigned long *v1_in,
 		v4 += 4;
 	} while (--lines > 0);
 
-	disable_kernel_altivec();
 	preempt_enable();
 }
 EXPORT_SYMBOL(xor_altivec_4);
@@ -175,7 +172,6 @@ void xor_altivec_5(unsigned long bytes, unsigned long *v1_in,
 		v5 += 4;
 	} while (--lines > 0);
 
-	disable_kernel_altivec();
 	preempt_enable();
 }
 EXPORT_SYMBOL(xor_altivec_5);

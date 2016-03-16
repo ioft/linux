@@ -44,7 +44,7 @@ int iterate_dir(struct file *file, struct dir_context *ctx)
 		fsnotify_access(file);
 		file_accessed(file);
 	}
-	inode_unlock(inode);
+	mutex_unlock(&inode->i_mutex);
 out:
 	return res;
 }

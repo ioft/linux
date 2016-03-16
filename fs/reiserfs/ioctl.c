@@ -224,7 +224,7 @@ out_unlock:
 	page_cache_release(page);
 
 out:
-	inode_unlock(inode);
+	mutex_unlock(&inode->i_mutex);
 	reiserfs_write_unlock(inode->i_sb);
 	return retval;
 }

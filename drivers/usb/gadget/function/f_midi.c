@@ -23,7 +23,6 @@
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/device.h>
-#include <linux/kfifo.h>
 
 #include <sound/core.h>
 #include <sound/initval.h>
@@ -76,7 +75,6 @@ struct f_midi {
 	struct usb_ep		*in_ep, *out_ep;
 	struct snd_card		*card;
 	struct snd_rawmidi	*rmidi;
-	u8			ms_id;
 
 	struct snd_rawmidi_substream *in_substream[MAX_PORTS];
 	struct snd_rawmidi_substream *out_substream[MAX_PORTS];
@@ -89,9 +87,6 @@ struct f_midi {
 	int index;
 	char *id;
 	unsigned int buflen, qlen;
-	/* This fifo is used as a buffer ring for pre-allocated IN usb_requests */
-	DECLARE_KFIFO_PTR(in_req_fifo, struct usb_request *);
-	unsigned int in_last_port;
 };
 
 static inline struct f_midi *func_to_midi(struct usb_function *f)
@@ -99,7 +94,7 @@ static inline struct f_midi *func_to_midi(struct usb_function *f)
 	return container_of(f, struct f_midi, func);
 }
 
-static void f_midi_transmit(struct f_midi *midi);
+static void f_midi_transmit(struct f_midi *midi, struct usb_request *req);
 
 DECLARE_UAC_AC_HEADER_DESCRIPTOR(1);
 DECLARE_USB_MIDI_OUT_JACK_DESCRIPTOR(1);
@@ -206,6 +201,12 @@ static inline struct usb_request *midi_alloc_ep_req(struct usb_ep *ep,
 	return alloc_ep_req(ep, length, length);
 }
 
+static void free_ep_req(struct usb_ep *ep, struct usb_request *req)
+{
+	kfree(req->buf);
+	usb_ep_free_request(ep, req);
+}
+
 static const uint8_t f_midi_cin_length[] = {
 	0, 0, 2, 3, 3, 1, 2, 3, 3, 3, 3, 3, 2, 2, 3, 1
 };
@@ -257,8 +258,7 @@ f_midi_complete(struct usb_ep *ep, struct usb_request *req)
 		} else if (ep == midi->in_ep) {
 			/* Our transmit completed. See if there's more to go.
 			 * f_midi_transmit eats req, don't queue it again. */
-			req->length = 0;
-			f_midi_transmit(midi);
+			f_midi_transmit(midi, req);
 			return;
 		}
 		break;
@@ -269,12 +269,10 @@ f_midi_complete(struct usb_ep *ep, struct usb_request *req)
 	case -ESHUTDOWN:	/* disconnect from host */
 		VDBG(cdev, "%s gone (%d), %d/%d\n", ep->name, status,
 				req->actual, req->length);
-		if (ep == midi->out_ep) {
+		if (ep == midi->out_ep)
 			f_midi_handle_out_data(ep, req);
-			/* We don't need to free IN requests because it's handled
-			 * by the midi->in_req_fifo. */
-			free_ep_req(ep, req);
-		}
+
+		free_ep_req(ep, req);
 		return;
 
 	case -EOVERFLOW:	/* buffer overrun on read means that
@@ -326,11 +324,12 @@ static int f_midi_start_ep(struct f_midi *midi,
 static int f_midi_set_alt(struct usb_function *f, unsigned intf, unsigned alt)
 {
 	struct f_midi *midi = func_to_midi(f);
+	struct usb_composite_dev *cdev = f->config->cdev;
 	unsigned i;
 	int err;
 
-	/* we only set alt for MIDIStreaming interface */
-	if (intf != midi->ms_id)
+	/* For Control Device interface we do nothing */
+	if (intf == 0)
 		return 0;
 
 	err = f_midi_start_ep(midi, f, midi->in_ep);
@@ -341,19 +340,23 @@ static int f_midi_set_alt(struct usb_function *f, unsigned intf, unsigned alt)
 	if (err)
 		return err;
 
-	/* pre-allocate write usb requests to use on f_midi_transmit. */
-	while (kfifo_avail(&midi->in_req_fifo)) {
-		struct usb_request *req =
-			midi_alloc_ep_req(midi->in_ep, midi->buflen);
+	usb_ep_disable(midi->out_ep);
 
-		if (req == NULL)
-			return -ENOMEM;
-
-		req->length = 0;
-		req->complete = f_midi_complete;
-
-		kfifo_put(&midi->in_req_fifo, req);
+	err = config_ep_by_speed(midi->gadget, f, midi->out_ep);
+	if (err) {
+		ERROR(cdev, "can't configure %s: %d\n",
+		      midi->out_ep->name, err);
+		return err;
 	}
+
+	err = usb_ep_enable(midi->out_ep);
+	if (err) {
+		ERROR(cdev, "can't start %s: %d\n",
+		      midi->out_ep->name, err);
+		return err;
+	}
+
+	midi->out_ep->driver_data = midi;
 
 	/* allocate a bunch of read buffers and queue them all at once. */
 	for (i = 0; i < midi->qlen && err == 0; i++) {
@@ -365,10 +368,9 @@ static int f_midi_set_alt(struct usb_function *f, unsigned intf, unsigned alt)
 		req->complete = f_midi_complete;
 		err = usb_ep_queue(midi->out_ep, req, GFP_ATOMIC);
 		if (err) {
-			ERROR(midi, "%s: couldn't enqueue request: %d\n",
+			ERROR(midi, "%s queue req: %d\n",
 				    midi->out_ep->name, err);
 			free_ep_req(midi->out_ep, req);
-			return err;
 		}
 	}
 
@@ -379,7 +381,6 @@ static void f_midi_disable(struct usb_function *f)
 {
 	struct f_midi *midi = func_to_midi(f);
 	struct usb_composite_dev *cdev = f->config->cdev;
-	struct usb_request *req = NULL;
 
 	DBG(cdev, "disable\n");
 
@@ -389,10 +390,6 @@ static void f_midi_disable(struct usb_function *f)
 	 */
 	usb_ep_disable(midi->in_ep);
 	usb_ep_disable(midi->out_ep);
-
-	/* release IN requests */
-	while (kfifo_get(&midi->in_req_fifo, &req))
-		free_ep_req(midi->in_ep, req);
 }
 
 static int f_midi_snd_free(struct snd_device *device)
@@ -514,113 +511,57 @@ static void f_midi_transmit_byte(struct usb_request *req,
 	}
 }
 
-static void f_midi_drop_out_substreams(struct f_midi *midi)
+static void f_midi_transmit(struct f_midi *midi, struct usb_request *req)
 {
-	unsigned int i;
+	struct usb_ep *ep = midi->in_ep;
+	int i;
+
+	if (!ep)
+		return;
+
+	if (!req)
+		req = midi_alloc_ep_req(ep, midi->buflen);
+
+	if (!req) {
+		ERROR(midi, "%s: alloc_ep_request failed\n", __func__);
+		return;
+	}
+	req->length = 0;
+	req->complete = f_midi_complete;
 
 	for (i = 0; i < MAX_PORTS; i++) {
 		struct gmidi_in_port *port = midi->in_port[i];
 		struct snd_rawmidi_substream *substream = midi->in_substream[i];
 
-		if (!port)
-			break;
-
-		if (!port->active || !substream)
+		if (!port || !port->active || !substream)
 			continue;
 
-		snd_rawmidi_drop_output(substream);
+		while (req->length + 3 < midi->buflen) {
+			uint8_t b;
+			if (snd_rawmidi_transmit(substream, &b, 1) != 1) {
+				port->active = 0;
+				break;
+			}
+			f_midi_transmit_byte(req, port, b);
+		}
 	}
-}
 
-static void f_midi_transmit(struct f_midi *midi)
-{
-	struct usb_ep *ep = midi->in_ep;
-	bool active;
+	if (req->length > 0 && ep->enabled) {
+		int err;
 
-	/* We only care about USB requests if IN endpoint is enabled */
-	if (!ep || !ep->enabled)
-		goto drop_out;
-
-	do {
-		struct usb_request *req = NULL;
-		unsigned int len, i;
-
-		active = false;
-
-		/* We peek the request in order to reuse it if it fails
-		 * to enqueue on its endpoint */
-		len = kfifo_peek(&midi->in_req_fifo, &req);
-		if (len != 1) {
-			ERROR(midi, "%s: Couldn't get usb request\n", __func__);
-			goto drop_out;
-		}
-
-		/* If buffer overrun, then we ignore this transmission.
-		 * IMPORTANT: This will cause the user-space rawmidi device to block until a) usb
-		 * requests have been completed or b) snd_rawmidi_write() times out. */
-		if (req->length > 0)
-			return;
-
-		for (i = midi->in_last_port; i < MAX_PORTS; i++) {
-			struct gmidi_in_port *port = midi->in_port[i];
-			struct snd_rawmidi_substream *substream = midi->in_substream[i];
-
-			if (!port) {
-				/* Reset counter when we reach the last available port */
-				midi->in_last_port = 0;
-				break;
-			}
-
-			if (!port->active || !substream)
-				continue;
-
-			while (req->length + 3 < midi->buflen) {
-				uint8_t b;
-
-				if (snd_rawmidi_transmit(substream, &b, 1) != 1) {
-					port->active = 0;
-					break;
-				}
-				f_midi_transmit_byte(req, port, b);
-			}
-
-			active = !!port->active;
-			/* Check if last port is still active, which means that
-			 * there is still data on that substream but this current
-			 * request run out of space. */
-			if (active) {
-				midi->in_last_port = i;
-				/* There is no need to re-iterate though midi ports. */
-				break;
-			}
-		}
-
-		if (req->length > 0) {
-			int err;
-
-			err = usb_ep_queue(ep, req, GFP_ATOMIC);
-			if (err < 0) {
-				ERROR(midi, "%s failed to queue req: %d\n",
-				      midi->in_ep->name, err);
-				req->length = 0; /* Re-use request next time. */
-			} else {
-				/* Upon success, put request at the back of the queue. */
-				kfifo_skip(&midi->in_req_fifo);
-				kfifo_put(&midi->in_req_fifo, req);
-			}
-		}
-	} while (active);
-
-	return;
-
-drop_out:
-	f_midi_drop_out_substreams(midi);
+		err = usb_ep_queue(ep, req, GFP_ATOMIC);
+		if (err < 0)
+			ERROR(midi, "%s queue req: %d\n",
+			      midi->in_ep->name, err);
+	} else {
+		free_ep_req(ep, req);
+	}
 }
 
 static void f_midi_in_tasklet(unsigned long data)
 {
 	struct f_midi *midi = (struct f_midi *) data;
-	f_midi_transmit(midi);
+	f_midi_transmit(midi, NULL);
 }
 
 static int f_midi_in_open(struct snd_rawmidi_substream *substream)
@@ -746,7 +687,6 @@ static int f_midi_register_card(struct f_midi *midi)
 		goto fail;
 	}
 	midi->rmidi = rmidi;
-	midi->in_last_port = 0;
 	strcpy(rmidi->name, card->shortname);
 	rmidi->info_flags = SNDRV_RAWMIDI_INFO_OUTPUT |
 			    SNDRV_RAWMIDI_INFO_INPUT |
@@ -815,7 +755,6 @@ static int f_midi_bind(struct usb_configuration *c, struct usb_function *f)
 		goto fail;
 	ms_interface_desc.bInterfaceNumber = status;
 	ac_header_desc.baInterfaceNr[0] = status;
-	midi->ms_id = status;
 
 	status = -ENODEV;
 
@@ -1136,7 +1075,6 @@ static void f_midi_free(struct usb_function *f)
 	mutex_lock(&opts->lock);
 	for (i = opts->in_ports - 1; i >= 0; --i)
 		kfree(midi->in_port[i]);
-	kfifo_free(&midi->in_req_fifo);
 	kfree(midi);
 	--opts->refcnt;
 	mutex_unlock(&opts->lock);
@@ -1210,12 +1148,6 @@ static struct usb_function *f_midi_alloc(struct usb_function_instance *fi)
 	midi->index = opts->index;
 	midi->buflen = opts->buflen;
 	midi->qlen = opts->qlen;
-	midi->in_last_port = 0;
-
-	status = kfifo_alloc(&midi->in_req_fifo, midi->qlen, GFP_KERNEL);
-	if (status)
-		goto setup_fail;
-
 	++opts->refcnt;
 	mutex_unlock(&opts->lock);
 

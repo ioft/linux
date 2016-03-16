@@ -29,12 +29,13 @@ enum {
 	ND_MAX_LANES = 256,
 	SECTOR_SHIFT = 9,
 	INT_LBASIZE_ALIGNMENT = 64,
-};
-
-struct nd_poison {
-	u64 start;
-	u64 length;
-	struct list_head list;
+#if IS_ENABLED(CONFIG_NVDIMM_PFN)
+	ND_PFN_ALIGN = PAGES_PER_SECTION * PAGE_SIZE,
+	ND_PFN_MASK = ND_PFN_ALIGN - 1,
+#else
+	ND_PFN_ALIGN = 0,
+	ND_PFN_MASK = 0,
+#endif
 };
 
 struct nvdimm_drvdata {
@@ -152,7 +153,6 @@ struct nd_pfn {
 	int id;
 	u8 *uuid;
 	struct device dev;
-	unsigned long align;
 	unsigned long npfns;
 	enum nd_pfn_mode mode;
 	struct nd_pfn_sb *pfn_sb;
@@ -262,8 +262,6 @@ int nvdimm_namespace_attach_btt(struct nd_namespace_common *ndns);
 int nvdimm_namespace_detach_btt(struct nd_namespace_common *ndns);
 const char *nvdimm_namespace_disk_name(struct nd_namespace_common *ndns,
 		char *name);
-void nvdimm_namespace_add_poison(struct nd_namespace_common *ndns,
-		struct badblocks *bb, resource_size_t offset);
 int nd_blk_region_init(struct nd_region *nd_region);
 void __nd_iostat_start(struct bio *bio, unsigned long *start);
 static inline bool nd_iostat_start(struct bio *bio, unsigned long *start)

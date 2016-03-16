@@ -2825,7 +2825,21 @@ sisusb_lseek(struct file *file, loff_t offset, int orig)
 		return -ENODEV;
 	}
 
-	ret = no_seek_end_llseek(file, offset, orig);
+	switch (orig) {
+		case 0:
+			file->f_pos = offset;
+			ret = file->f_pos;
+			/* never negative, no force_successful_syscall needed */
+			break;
+		case 1:
+			file->f_pos += offset;
+			ret = file->f_pos;
+			/* never negative, no force_successful_syscall needed */
+			break;
+		default:
+			/* seeking relative to "end of file" is not supported */
+			ret = -EINVAL;
+	}
 
 	mutex_unlock(&sisusb->lock);
 	return ret;

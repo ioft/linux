@@ -1431,7 +1431,7 @@ static bool __ieee80211_tx(struct ieee80211_local *local,
 			info->hw_queue =
 				vif->hw_queue[skb_get_queue_mapping(skb)];
 		} else if (ieee80211_hw_check(&local->hw, QUEUE_CONTROL)) {
-			ieee80211_purge_tx_queue(&local->hw, skbs);
+			dev_kfree_skb(skb);
 			return true;
 		} else
 			vif = NULL;

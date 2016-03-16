@@ -48,6 +48,7 @@
 #include <linux/tipc_netlink.h>
 #include "core.h"
 #include "bearer.h"
+#include "msg.h"
 
 /* IANA assigned UDP port */
 #define UDP_PORT_DEFAULT	6118
@@ -182,9 +183,15 @@ static int tipc_udp_send_msg(struct net *net, struct sk_buff *skb,
 			goto tx_error;
 		}
 		ttl = ip4_dst_hoplimit(&rt->dst);
-		udp_tunnel_xmit_skb(rt, ub->ubsock->sk, skb, src->ipv4.s_addr,
-				    dst->ipv4.s_addr, 0, ttl, 0, src->udp_port,
-				    dst->udp_port, false, true);
+		err = udp_tunnel_xmit_skb(rt, ub->ubsock->sk, skb,
+					  src->ipv4.s_addr,
+					  dst->ipv4.s_addr, 0, ttl, 0,
+					  src->udp_port, dst->udp_port,
+					  false, true);
+		if (err < 0) {
+			ip_rt_put(rt);
+			goto tx_error;
+		}
 #if IS_ENABLED(CONFIG_IPV6)
 	} else {
 		struct dst_entry *ndst;
@@ -217,6 +224,10 @@ static int tipc_udp_recv(struct sock *sk, struct sk_buff *skb)
 {
 	struct udp_bearer *ub;
 	struct tipc_bearer *b;
+	int usr = msg_user(buf_msg(skb));
+
+	if ((usr == LINK_PROTOCOL) || (usr == NAME_DISTRIBUTOR))
+		skb_linearize(skb);
 
 	ub = rcu_dereference_sk_user_data(sk);
 	if (!ub) {

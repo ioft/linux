@@ -211,9 +211,9 @@ static bool dce_v11_0_is_counter_moving(struct amdgpu_device *adev, int crtc)
  */
 static void dce_v11_0_vblank_wait(struct amdgpu_device *adev, int crtc)
 {
-	unsigned i = 100;
+	unsigned i = 0;
 
-	if (crtc < 0 || crtc >= adev->mode_info.num_crtc)
+	if (crtc >= adev->mode_info.num_crtc)
 		return;
 
 	if (!(RREG32(mmCRTC_CONTROL + crtc_offsets[crtc]) & CRTC_CONTROL__CRTC_MASTER_EN_MASK))
@@ -223,16 +223,14 @@ static void dce_v11_0_vblank_wait(struct amdgpu_device *adev, int crtc)
 	 * wait for another frame.
 	 */
 	while (dce_v11_0_is_in_vblank(adev, crtc)) {
-		if (i++ == 100) {
-			i = 0;
+		if (i++ % 100 == 0) {
 			if (!dce_v11_0_is_counter_moving(adev, crtc))
 				break;
 		}
 	}
 
 	while (!dce_v11_0_is_in_vblank(adev, crtc)) {
-		if (i++ == 100) {
-			i = 0;
+		if (i++ % 100 == 0) {
 			if (!dce_v11_0_is_counter_moving(adev, crtc))
 				break;
 		}
@@ -241,7 +239,7 @@ static void dce_v11_0_vblank_wait(struct amdgpu_device *adev, int crtc)
 
 static u32 dce_v11_0_vblank_get_counter(struct amdgpu_device *adev, int crtc)
 {
-	if (crtc < 0 || crtc >= adev->mode_info.num_crtc)
+	if (crtc >= adev->mode_info.num_crtc)
 		return 0;
 	else
 		return RREG32(mmCRTC_STATUS_FRAME_COUNT + crtc_offsets[crtc]);
@@ -3386,7 +3384,7 @@ static void dce_v11_0_crtc_vblank_int_ack(struct amdgpu_device *adev,
 {
 	u32 tmp;
 
-	if (crtc < 0 || crtc >= adev->mode_info.num_crtc) {
+	if (crtc >= adev->mode_info.num_crtc) {
 		DRM_DEBUG("invalid crtc %d\n", crtc);
 		return;
 	}
@@ -3401,7 +3399,7 @@ static void dce_v11_0_crtc_vline_int_ack(struct amdgpu_device *adev,
 {
 	u32 tmp;
 
-	if (crtc < 0 || crtc >= adev->mode_info.num_crtc) {
+	if (crtc >= adev->mode_info.num_crtc) {
 		DRM_DEBUG("invalid crtc %d\n", crtc);
 		return;
 	}
@@ -3724,7 +3722,7 @@ static void dce_v11_0_encoder_add(struct amdgpu_device *adev,
 	case ENCODER_OBJECT_ID_INTERNAL_KLDSCP_DAC1:
 	case ENCODER_OBJECT_ID_INTERNAL_KLDSCP_DAC2:
 		drm_encoder_init(dev, encoder, &dce_v11_0_encoder_funcs,
-				 DRM_MODE_ENCODER_DAC, NULL);
+				 DRM_MODE_ENCODER_DAC);
 		drm_encoder_helper_add(encoder, &dce_v11_0_dac_helper_funcs);
 		break;
 	case ENCODER_OBJECT_ID_INTERNAL_KLDSCP_DVO1:
@@ -3735,15 +3733,15 @@ static void dce_v11_0_encoder_add(struct amdgpu_device *adev,
 		if (amdgpu_encoder->devices & (ATOM_DEVICE_LCD_SUPPORT)) {
 			amdgpu_encoder->rmx_type = RMX_FULL;
 			drm_encoder_init(dev, encoder, &dce_v11_0_encoder_funcs,
-					 DRM_MODE_ENCODER_LVDS, NULL);
+					 DRM_MODE_ENCODER_LVDS);
 			amdgpu_encoder->enc_priv = amdgpu_atombios_encoder_get_lcd_info(amdgpu_encoder);
 		} else if (amdgpu_encoder->devices & (ATOM_DEVICE_CRT_SUPPORT)) {
 			drm_encoder_init(dev, encoder, &dce_v11_0_encoder_funcs,
-					 DRM_MODE_ENCODER_DAC, NULL);
+					 DRM_MODE_ENCODER_DAC);
 			amdgpu_encoder->enc_priv = amdgpu_atombios_encoder_get_dig_info(amdgpu_encoder);
 		} else {
 			drm_encoder_init(dev, encoder, &dce_v11_0_encoder_funcs,
-					 DRM_MODE_ENCODER_TMDS, NULL);
+					 DRM_MODE_ENCODER_TMDS);
 			amdgpu_encoder->enc_priv = amdgpu_atombios_encoder_get_dig_info(amdgpu_encoder);
 		}
 		drm_encoder_helper_add(encoder, &dce_v11_0_dig_helper_funcs);
@@ -3761,13 +3759,13 @@ static void dce_v11_0_encoder_add(struct amdgpu_device *adev,
 		amdgpu_encoder->is_ext_encoder = true;
 		if (amdgpu_encoder->devices & (ATOM_DEVICE_LCD_SUPPORT))
 			drm_encoder_init(dev, encoder, &dce_v11_0_encoder_funcs,
-					 DRM_MODE_ENCODER_LVDS, NULL);
+					 DRM_MODE_ENCODER_LVDS);
 		else if (amdgpu_encoder->devices & (ATOM_DEVICE_CRT_SUPPORT))
 			drm_encoder_init(dev, encoder, &dce_v11_0_encoder_funcs,
-					 DRM_MODE_ENCODER_DAC, NULL);
+					 DRM_MODE_ENCODER_DAC);
 		else
 			drm_encoder_init(dev, encoder, &dce_v11_0_encoder_funcs,
-					 DRM_MODE_ENCODER_TMDS, NULL);
+					 DRM_MODE_ENCODER_TMDS);
 		drm_encoder_helper_add(encoder, &dce_v11_0_ext_helper_funcs);
 		break;
 	}

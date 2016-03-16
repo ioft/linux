@@ -10,7 +10,7 @@
  */
 #include "util.h"
 #include "cache.h"
-#include <subcmd/exec-cmd.h>
+#include "exec_cmd.h"
 #include "util/hist.h"  /* perf_hist_config */
 #include "util/llvm-utils.h"   /* perf_llvm_config */
 
@@ -26,7 +26,7 @@ static const char *config_file_name;
 static int config_linenr;
 static int config_file_eof;
 
-const char *config_exclusive_filename;
+static const char *config_exclusive_filename;
 
 static int get_next_char(void)
 {
@@ -434,7 +434,7 @@ static int perf_config_from_file(config_fn_t fn, const char *filename, void *dat
 	return ret;
 }
 
-const char *perf_etc_perfconfig(void)
+static const char *perf_etc_perfconfig(void)
 {
 	static const char *system_wide;
 	if (!system_wide)

@@ -4,7 +4,6 @@
 #include <linux/sched.h>
 #include <linux/cpu.h>
 #include <linux/cpuidle.h>
-#include <linux/cpuhotplug.h>
 #include <linux/tick.h>
 #include <linux/mm.h>
 #include <linux/stackprotector.h>
@@ -98,6 +97,12 @@ void default_idle_call(void)
 static int call_cpuidle(struct cpuidle_driver *drv, struct cpuidle_device *dev,
 		      int next_state)
 {
+	/* Fall back to the default arch idle method on errors. */
+	if (next_state < 0) {
+		default_idle_call();
+		return next_state;
+	}
+
 	/*
 	 * The idle task must be scheduled, it is pointless to go to idle, just
 	 * update no idle residency and return.
@@ -163,7 +168,7 @@ static void cpuidle_idle_call(void)
 	 */
 	if (idle_should_freeze()) {
 		entered_state = cpuidle_enter_freeze(drv, dev);
-		if (entered_state > 0) {
+		if (entered_state >= 0) {
 			local_irq_enable();
 			goto exit_idle;
 		}
@@ -194,6 +199,8 @@ exit_idle:
 	rcu_idle_exit();
 }
 
+DEFINE_PER_CPU(bool, cpu_dead_idle);
+
 /*
  * Generic idle loop implementation
  *
@@ -212,7 +219,6 @@ static void cpu_idle_loop(void)
 		 */
 
 		__current_set_polling();
-		quiet_vmstat();
 		tick_nohz_idle_enter();
 
 		while (!need_resched()) {
@@ -220,7 +226,10 @@ static void cpu_idle_loop(void)
 			rmb();
 
 			if (cpu_is_offline(smp_processor_id())) {
-				cpuhp_report_idle_dead();
+				rcu_cpu_notify(NULL, CPU_DYING_IDLE,
+					       (void *)(long)smp_processor_id());
+				smp_mb(); /* all activity before dead. */
+				this_cpu_write(cpu_dead_idle, true);
 				arch_cpu_idle_dead();
 			}
 
@@ -287,6 +296,5 @@ void cpu_startup_entry(enum cpuhp_state state)
 	boot_init_stack_canary();
 #endif
 	arch_cpu_idle_prepare();
-	cpuhp_online_idle(state);
 	cpu_idle_loop();
 }

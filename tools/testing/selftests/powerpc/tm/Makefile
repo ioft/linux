@@ -1,8 +1,8 @@
-TEST_PROGS := tm-resched-dscr tm-syscall tm-signal-msr-resv tm-signal-stack tm-vmxcopy
+TEST_PROGS := tm-resched-dscr tm-syscall
 
 all: $(TEST_PROGS)
 
-$(TEST_PROGS): ../harness.c ../utils.c
+$(TEST_PROGS): ../harness.c
 
 tm-syscall: tm-syscall-asm.S
 tm-syscall: CFLAGS += -mhtm -I../../../../../usr/include

@@ -53,8 +53,6 @@
 #ifndef __6LOWPAN_H__
 #define __6LOWPAN_H__
 
-#include <linux/debugfs.h>
-
 #include <net/ipv6.h>
 #include <net/net_namespace.h>
 
@@ -100,7 +98,6 @@ enum lowpan_lltypes {
 
 struct lowpan_priv {
 	enum lowpan_lltypes lltype;
-	struct dentry *iface_debugfs;
 
 	/* must be last */
 	u8 priv[0] __aligned(sizeof(void *));
@@ -188,12 +185,7 @@ static inline void lowpan_push_hc_data(u8 **hc_ptr, const void *data,
 	*hc_ptr += len;
 }
 
-int lowpan_register_netdevice(struct net_device *dev,
-			      enum lowpan_lltypes lltype);
-int lowpan_register_netdev(struct net_device *dev,
-			   enum lowpan_lltypes lltype);
-void lowpan_unregister_netdevice(struct net_device *dev);
-void lowpan_unregister_netdev(struct net_device *dev);
+void lowpan_netdev_setup(struct net_device *dev, enum lowpan_lltypes lltype);
 
 /**
  * lowpan_header_decompress - replace 6LoWPAN header with IPv6 header

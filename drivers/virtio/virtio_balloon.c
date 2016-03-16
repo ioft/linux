@@ -209,8 +209,8 @@ static unsigned leak_balloon(struct virtio_balloon *vb, size_t num)
 	 */
 	if (vb->num_pfns != 0)
 		tell_host(vb, vb->deflate_vq);
-	release_pages_balloon(vb);
 	mutex_unlock(&vb->balloon_lock);
+	release_pages_balloon(vb);
 	return num_freed_pages;
 }
 
@@ -388,7 +388,7 @@ static int init_vqs(struct virtio_balloon *vb)
 {
 	struct virtqueue *vqs[3];
 	vq_callback_t *callbacks[] = { balloon_ack, balloon_ack, stats_request };
-	static const char * const names[] = { "inflate", "deflate", "stats" };
+	const char *names[] = { "inflate", "deflate", "stats" };
 	int err, nvqs;
 
 	/*

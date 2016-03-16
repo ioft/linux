@@ -983,5 +983,5 @@ int octeon_create_droq(struct octeon_device *oct,
 
 create_droq_fail:
 	octeon_delete_droq(oct, q_no);
-	return -ENOMEM;
+	return -1;
 }

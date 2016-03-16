@@ -66,15 +66,13 @@ struct resource crashk_res = {
 	.name  = "Crash kernel",
 	.start = 0,
 	.end   = 0,
-	.flags = IORESOURCE_BUSY | IORESOURCE_SYSTEM_RAM,
-	.desc  = IORES_DESC_CRASH_KERNEL
+	.flags = IORESOURCE_BUSY | IORESOURCE_MEM
 };
 struct resource crashk_low_res = {
 	.name  = "Crash kernel",
 	.start = 0,
 	.end   = 0,
-	.flags = IORESOURCE_BUSY | IORESOURCE_SYSTEM_RAM,
-	.desc  = IORES_DESC_CRASH_KERNEL
+	.flags = IORESOURCE_BUSY | IORESOURCE_MEM
 };
 
 int kexec_should_crash(struct task_struct *p)
@@ -312,9 +310,12 @@ static void kimage_free_pages(struct page *page)
 
 void kimage_free_page_list(struct list_head *list)
 {
-	struct page *page, *next;
+	struct list_head *pos, *next;
 
-	list_for_each_entry_safe(page, next, list, lru) {
+	list_for_each_safe(pos, next, list) {
+		struct page *page;
+
+		page = list_entry(pos, struct page, lru);
 		list_del(&page->lru);
 		kimage_free_pages(page);
 	}
@@ -852,12 +853,7 @@ struct kimage *kexec_image;
 struct kimage *kexec_crash_image;
 int kexec_load_disabled;
 
-/*
- * No panic_cpu check version of crash_kexec().  This function is called
- * only when panic_cpu holds the current CPU number; this is the only CPU
- * which processes crash_kexec routines.
- */
-void __crash_kexec(struct pt_regs *regs)
+void crash_kexec(struct pt_regs *regs)
 {
 	/* Take the kexec_mutex here to prevent sys_kexec_load
 	 * running on one cpu from replacing the crash kernel
@@ -877,29 +873,6 @@ void __crash_kexec(struct pt_regs *regs)
 			machine_kexec(kexec_crash_image);
 		}
 		mutex_unlock(&kexec_mutex);
-	}
-}
-
-void crash_kexec(struct pt_regs *regs)
-{
-	int old_cpu, this_cpu;
-
-	/*
-	 * Only one CPU is allowed to execute the crash_kexec() code as with
-	 * panic().  Otherwise parallel calls of panic() and crash_kexec()
-	 * may stop each other.  To exclude them, we use panic_cpu here too.
-	 */
-	this_cpu = raw_smp_processor_id();
-	old_cpu = atomic_cmpxchg(&panic_cpu, PANIC_CPU_INVALID, this_cpu);
-	if (old_cpu == PANIC_CPU_INVALID) {
-		/* This is the 1st CPU which comes here, so go ahead. */
-		__crash_kexec(regs);
-
-		/*
-		 * Reset panic_cpu to allow another panic()/crash_kexec()
-		 * call.
-		 */
-		atomic_set(&panic_cpu, PANIC_CPU_INVALID);
 	}
 }
 
@@ -961,7 +934,7 @@ int crash_shrink_memory(unsigned long new_size)
 
 	ram_res->start = end;
 	ram_res->end = crashk_res.end;
-	ram_res->flags = IORESOURCE_BUSY | IORESOURCE_SYSTEM_RAM;
+	ram_res->flags = IORESOURCE_BUSY | IORESOURCE_MEM;
 	ram_res->name = "System RAM";
 
 	crashk_res.end = end - 1;

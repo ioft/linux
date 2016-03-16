@@ -889,7 +889,7 @@ EXPORT_SYMBOL_GPL(devm_pwm_put);
   */
 bool pwm_can_sleep(struct pwm_device *pwm)
 {
-	return true;
+	return pwm->chip->can_sleep;
 }
 EXPORT_SYMBOL_GPL(pwm_can_sleep);
 

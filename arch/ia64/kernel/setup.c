@@ -80,17 +80,17 @@ unsigned long vga_console_membase;
 
 static struct resource data_resource = {
 	.name	= "Kernel data",
-	.flags	= IORESOURCE_BUSY | IORESOURCE_SYSTEM_RAM
+	.flags	= IORESOURCE_BUSY | IORESOURCE_MEM
 };
 
 static struct resource code_resource = {
 	.name	= "Kernel code",
-	.flags	= IORESOURCE_BUSY | IORESOURCE_SYSTEM_RAM
+	.flags	= IORESOURCE_BUSY | IORESOURCE_MEM
 };
 
 static struct resource bss_resource = {
 	.name	= "Kernel bss",
-	.flags	= IORESOURCE_BUSY | IORESOURCE_SYSTEM_RAM
+	.flags	= IORESOURCE_BUSY | IORESOURCE_MEM
 };
 
 unsigned long ia64_max_cacheline_size;

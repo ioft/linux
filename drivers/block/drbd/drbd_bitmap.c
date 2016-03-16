@@ -24,7 +24,7 @@
 
 #define pr_fmt(fmt)	KBUILD_MODNAME ": " fmt
 
-#include <linux/bitmap.h>
+#include <linux/bitops.h>
 #include <linux/vmalloc.h>
 #include <linux/string.h>
 #include <linux/drbd.h>
@@ -364,9 +364,12 @@ static void bm_free_pages(struct page **pages, unsigned long number)
 	}
 }
 
-static inline void bm_vk_free(void *ptr)
+static void bm_vk_free(void *ptr, int v)
 {
-	kvfree(ptr);
+	if (v)
+		vfree(ptr);
+	else
+		kfree(ptr);
 }
 
 /*
@@ -376,7 +379,7 @@ static struct page **bm_realloc_pages(struct drbd_bitmap *b, unsigned long want)
 {
 	struct page **old_pages = b->bm_pages;
 	struct page **new_pages, *page;
-	unsigned int i, bytes;
+	unsigned int i, bytes, vmalloced = 0;
 	unsigned long have = b->bm_number_of_pages;
 
 	BUG_ON(have == 0 && old_pages != NULL);
@@ -398,6 +401,7 @@ static struct page **bm_realloc_pages(struct drbd_bitmap *b, unsigned long want)
 				PAGE_KERNEL);
 		if (!new_pages)
 			return NULL;
+		vmalloced = 1;
 	}
 
 	if (want >= have) {
@@ -407,7 +411,7 @@ static struct page **bm_realloc_pages(struct drbd_bitmap *b, unsigned long want)
 			page = alloc_page(GFP_NOIO | __GFP_HIGHMEM);
 			if (!page) {
 				bm_free_pages(new_pages + have, i - have);
-				bm_vk_free(new_pages);
+				bm_vk_free(new_pages, vmalloced);
 				return NULL;
 			}
 			/* we want to know which page it is
@@ -422,6 +426,11 @@ static struct page **bm_realloc_pages(struct drbd_bitmap *b, unsigned long want)
 		bm_free_pages(old_pages + want, have - want);
 		*/
 	}
+
+	if (vmalloced)
+		b->bm_flags |= BM_P_VMALLOCED;
+	else
+		b->bm_flags &= ~BM_P_VMALLOCED;
 
 	return new_pages;
 }
@@ -460,7 +469,7 @@ void drbd_bm_cleanup(struct drbd_device *device)
 	if (!expect(device->bitmap))
 		return;
 	bm_free_pages(device->bitmap->bm_pages, device->bitmap->bm_number_of_pages);
-	bm_vk_free(device->bitmap->bm_pages);
+	bm_vk_free(device->bitmap->bm_pages, (BM_P_VMALLOCED & device->bitmap->bm_flags));
 	kfree(device->bitmap);
 	device->bitmap = NULL;
 }
@@ -470,14 +479,8 @@ void drbd_bm_cleanup(struct drbd_device *device)
  * this masks out the remaining bits.
  * Returns the number of bits cleared.
  */
-#ifndef BITS_PER_PAGE
 #define BITS_PER_PAGE		(1UL << (PAGE_SHIFT + 3))
 #define BITS_PER_PAGE_MASK	(BITS_PER_PAGE - 1)
-#else
-# if BITS_PER_PAGE != (1UL << (PAGE_SHIFT + 3))
-#  error "ambiguous BITS_PER_PAGE"
-# endif
-#endif
 #define BITS_PER_LONG_MASK	(BITS_PER_LONG - 1)
 static int bm_clear_surplus(struct drbd_bitmap *b)
 {
@@ -556,19 +559,21 @@ static unsigned long bm_count_bits(struct drbd_bitmap *b)
 	unsigned long *p_addr;
 	unsigned long bits = 0;
 	unsigned long mask = (1UL << (b->bm_bits & BITS_PER_LONG_MASK)) -1;
-	int idx, last_word;
+	int idx, i, last_word;
 
 	/* all but last page */
 	for (idx = 0; idx < b->bm_number_of_pages - 1; idx++) {
 		p_addr = __bm_map_pidx(b, idx);
-		bits += bitmap_weight(p_addr, BITS_PER_PAGE);
+		for (i = 0; i < LWPP; i++)
+			bits += hweight_long(p_addr[i]);
 		__bm_unmap(p_addr);
 		cond_resched();
 	}
 	/* last (or only) page */
 	last_word = ((b->bm_bits - 1) & BITS_PER_PAGE_MASK) >> LN2_BPL;
 	p_addr = __bm_map_pidx(b, idx);
-	bits += bitmap_weight(p_addr, last_word * BITS_PER_LONG);
+	for (i = 0; i < last_word; i++)
+		bits += hweight_long(p_addr[i]);
 	p_addr[last_word] &= cpu_to_lel(mask);
 	bits += hweight_long(p_addr[last_word]);
 	/* 32bit arch, may have an unused padding long */
@@ -634,6 +639,7 @@ int drbd_bm_resize(struct drbd_device *device, sector_t capacity, int set_new_bi
 	unsigned long want, have, onpages; /* number of pages */
 	struct page **npages, **opages = NULL;
 	int err = 0, growing;
+	int opages_vmalloced;
 
 	if (!expect(b))
 		return -ENOMEM;
@@ -645,6 +651,8 @@ int drbd_bm_resize(struct drbd_device *device, sector_t capacity, int set_new_bi
 
 	if (capacity == b->bm_dev_capacity)
 		goto out;
+
+	opages_vmalloced = (BM_P_VMALLOCED & b->bm_flags);
 
 	if (capacity == 0) {
 		spin_lock_irq(&b->bm_lock);
@@ -659,7 +667,7 @@ int drbd_bm_resize(struct drbd_device *device, sector_t capacity, int set_new_bi
 		b->bm_dev_capacity = 0;
 		spin_unlock_irq(&b->bm_lock);
 		bm_free_pages(opages, onpages);
-		bm_vk_free(opages);
+		bm_vk_free(opages, opages_vmalloced);
 		goto out;
 	}
 	bits  = BM_SECT_TO_BIT(ALIGN(capacity, BM_SECT_PER_BIT));
@@ -732,7 +740,7 @@ int drbd_bm_resize(struct drbd_device *device, sector_t capacity, int set_new_bi
 
 	spin_unlock_irq(&b->bm_lock);
 	if (opages != npages)
-		bm_vk_free(opages);
+		bm_vk_free(opages, opages_vmalloced);
 	if (!growing)
 		b->bm_set = bm_count_bits(b);
 	drbd_info(device, "resync bitmap: bits=%lu words=%lu pages=%lu\n", bits, words, want);
@@ -1411,9 +1419,6 @@ static inline void bm_set_full_words_within_one_page(struct drbd_bitmap *b,
 	int bits;
 	int changed = 0;
 	unsigned long *paddr = kmap_atomic(b->bm_pages[page_nr]);
-
-	/* I think it is more cache line friendly to hweight_long then set to ~0UL,
-	 * than to first bitmap_weight() all words, then bitmap_fill() all words */
 	for (i = first_word; i < last_word; i++) {
 		bits = hweight_long(paddr[i]);
 		paddr[i] = ~0UL;
@@ -1623,7 +1628,8 @@ int drbd_bm_e_weight(struct drbd_device *device, unsigned long enr)
 		int n = e-s;
 		p_addr = bm_map_pidx(b, bm_word_to_page_idx(b, s));
 		bm = p_addr + MLPP(s);
-		count += bitmap_weight(bm, n * BITS_PER_LONG);
+		while (n--)
+			count += hweight_long(*bm++);
 		bm_unmap(p_addr);
 	} else {
 		drbd_err(device, "start offset (%d) too large in drbd_bm_e_weight\n", s);

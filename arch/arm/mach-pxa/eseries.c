@@ -31,12 +31,12 @@
 #include <asm/mach/arch.h>
 #include <asm/mach-types.h>
 
-#include "pxa25x.h"
+#include <mach/pxa25x.h>
 #include <mach/eseries-gpio.h>
-#include "eseries-irq.h"
+#include <mach/eseries-irq.h>
 #include <mach/audio.h>
 #include <linux/platform_data/video-pxafb.h>
-#include "udc.h"
+#include <mach/udc.h>
 #include <linux/platform_data/irda-pxaficp.h>
 
 #include "devices.h"

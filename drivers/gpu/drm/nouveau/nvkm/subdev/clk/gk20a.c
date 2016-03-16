@@ -141,8 +141,9 @@ gk20a_pllg_calc_rate(struct gk20a_clk *clk)
 
 	rate = clk->parent_rate * clk->n;
 	divider = clk->m * pl_to_div[clk->pl];
+	do_div(rate, divider);
 
-	return rate / divider / 2;
+	return rate / 2;
 }
 
 static int

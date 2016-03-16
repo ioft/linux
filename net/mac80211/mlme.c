@@ -1935,8 +1935,7 @@ static void ieee80211_set_associated(struct ieee80211_sub_if_data *sdata,
 
 	sdata->u.mgd.flags |= IEEE80211_STA_RESET_SIGNAL_AVE;
 
-	if (sdata->vif.p2p ||
-	    sdata->vif.driver_flags & IEEE80211_VIF_GET_NOA_UPDATE) {
+	if (sdata->vif.p2p) {
 		const struct cfg80211_bss_ies *ies;
 
 		rcu_read_lock();
@@ -3464,8 +3463,7 @@ static void ieee80211_rx_mgmt_beacon(struct ieee80211_sub_if_data *sdata,
 		}
 	}
 
-	if (sdata->vif.p2p ||
-	    sdata->vif.driver_flags & IEEE80211_VIF_GET_NOA_UPDATE) {
+	if (sdata->vif.p2p) {
 		struct ieee80211_p2p_noa_attr noa = {};
 		int ret;
 
@@ -4005,6 +4003,8 @@ static void ieee80211_restart_sta_timer(struct ieee80211_sub_if_data *sdata)
 		if (!ieee80211_hw_check(&sdata->local->hw, CONNECTION_MONITOR))
 			ieee80211_queue_work(&sdata->local->hw,
 					     &sdata->u.mgd.monitor_work);
+		/* and do all the other regular work too */
+		ieee80211_queue_work(&sdata->local->hw, &sdata->work);
 	}
 }
 

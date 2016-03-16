@@ -237,23 +237,28 @@ static ssize_t event_trigger_regex_write(struct file *file,
 	if (cnt >= PAGE_SIZE)
 		return -EINVAL;
 
-	buf = memdup_user_nul(ubuf, cnt);
-	if (IS_ERR(buf))
-		return PTR_ERR(buf);
+	buf = (char *)__get_free_page(GFP_TEMPORARY);
+	if (!buf)
+		return -ENOMEM;
 
+	if (copy_from_user(buf, ubuf, cnt)) {
+		free_page((unsigned long)buf);
+		return -EFAULT;
+	}
+	buf[cnt] = '\0';
 	strim(buf);
 
 	mutex_lock(&event_mutex);
 	event_file = event_file_data(file);
 	if (unlikely(!event_file)) {
 		mutex_unlock(&event_mutex);
-		kfree(buf);
+		free_page((unsigned long)buf);
 		return -ENODEV;
 	}
 	ret = trigger_process_regex(event_file, buf);
 	mutex_unlock(&event_mutex);
 
-	kfree(buf);
+	free_page((unsigned long)buf);
 	if (ret < 0)
 		goto out;
 
@@ -538,12 +543,11 @@ static int register_trigger(char *glob, struct event_trigger_ops *ops,
 	list_add_rcu(&data->list, &file->triggers);
 	ret++;
 
-	update_cond_flag(file);
 	if (trace_event_trigger_enable_disable(file, 1) < 0) {
 		list_del_rcu(&data->list);
-		update_cond_flag(file);
 		ret--;
 	}
+	update_cond_flag(file);
 out:
 	return ret;
 }
@@ -571,8 +575,8 @@ static void unregister_trigger(char *glob, struct event_trigger_ops *ops,
 		if (data->cmd_ops->trigger_type == test->cmd_ops->trigger_type) {
 			unregistered = true;
 			list_del_rcu(&data->list);
-			trace_event_trigger_enable_disable(file, 0);
 			update_cond_flag(file);
+			trace_event_trigger_enable_disable(file, 0);
 			break;
 		}
 	}
@@ -1315,12 +1319,11 @@ static int event_enable_register_trigger(char *glob,
 	list_add_rcu(&data->list, &file->triggers);
 	ret++;
 
-	update_cond_flag(file);
 	if (trace_event_trigger_enable_disable(file, 1) < 0) {
 		list_del_rcu(&data->list);
-		update_cond_flag(file);
 		ret--;
 	}
+	update_cond_flag(file);
 out:
 	return ret;
 }
@@ -1341,8 +1344,8 @@ static void event_enable_unregister_trigger(char *glob,
 		    (enable_data->file == test_enable_data->file)) {
 			unregistered = true;
 			list_del_rcu(&data->list);
-			trace_event_trigger_enable_disable(file, 0);
 			update_cond_flag(file);
+			trace_event_trigger_enable_disable(file, 0);
 			break;
 		}
 	}

@@ -74,7 +74,3 @@
 &xgenet {
 	status = "ok";
 };
-
-&mmc0 {
-	status = "ok";
-};

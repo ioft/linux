@@ -27,7 +27,7 @@
  * Copyright (c) 2007, 2010, Oracle and/or its affiliates. All rights reserved.
  * Use is subject to license terms.
  *
- * Copyright (c) 2010, 2015, Intel Corporation.
+ * Copyright (c) 2010, 2012, Intel Corporation.
  */
 /*
  * This file is part of Lustre, http://www.lustre.org/
@@ -176,6 +176,11 @@ enum {
 	LDLM_POOL_LAST_STAT
 };
 
+static inline struct ldlm_namespace *ldlm_pl2ns(struct ldlm_pool *pl)
+{
+	return container_of(pl, struct ldlm_namespace, ns_pool);
+}
+
 /**
  * Calculates suggested grant_step in % of available locks for passed
  * \a period. This is later used in grant_plan calculations.
@@ -208,6 +213,22 @@ static inline int ldlm_pool_t2gsp(unsigned int t)
 }
 
 /**
+ * Returns current \a pl limit.
+ */
+static __u32 ldlm_pool_get_limit(struct ldlm_pool *pl)
+{
+	return atomic_read(&pl->pl_limit);
+}
+
+/**
+ * Sets passed \a limit to \a pl.
+ */
+static void ldlm_pool_set_limit(struct ldlm_pool *pl, __u32 limit)
+{
+	atomic_set(&pl->pl_limit, limit);
+}
+
+/**
  * Recalculates next stats on passed \a pl.
  *
  * \pre ->pl_lock is locked.
@@ -233,8 +254,7 @@ static void ldlm_pool_recalc_stats(struct ldlm_pool *pl)
 }
 
 /**
- * Sets SLV and Limit from container_of(pl, struct ldlm_namespace,
- * ns_pool)->ns_obd tp passed \a pl.
+ * Sets SLV and Limit from ldlm_pl2ns(pl)->ns_obd tp passed \a pl.
  */
 static void ldlm_cli_pool_pop_slv(struct ldlm_pool *pl)
 {
@@ -244,12 +264,11 @@ static void ldlm_cli_pool_pop_slv(struct ldlm_pool *pl)
 	 * Get new SLV and Limit from obd which is updated with coming
 	 * RPCs.
 	 */
-	obd = container_of(pl, struct ldlm_namespace,
-			   ns_pool)->ns_obd;
+	obd = ldlm_pl2ns(pl)->ns_obd;
 	LASSERT(obd != NULL);
 	read_lock(&obd->obd_pool_lock);
 	pl->pl_server_lock_volume = obd->obd_pool_slv;
-	atomic_set(&pl->pl_limit, obd->obd_pool_limit);
+	ldlm_pool_set_limit(pl, obd->obd_pool_limit);
 	read_unlock(&obd->obd_pool_lock);
 }
 
@@ -285,8 +304,7 @@ static int ldlm_cli_pool_recalc(struct ldlm_pool *pl)
 	/*
 	 * Do not cancel locks in case lru resize is disabled for this ns.
 	 */
-	if (!ns_connect_lru_resize(container_of(pl, struct ldlm_namespace,
-						ns_pool))) {
+	if (!ns_connect_lru_resize(ldlm_pl2ns(pl))) {
 		ret = 0;
 		goto out;
 	}
@@ -297,8 +315,7 @@ static int ldlm_cli_pool_recalc(struct ldlm_pool *pl)
 	 * It may be called when SLV has changed much, this is why we do not
 	 * take into account pl->pl_recalc_time here.
 	 */
-	ret = ldlm_cancel_lru(container_of(pl, struct ldlm_namespace, ns_pool),
-			      0, LCF_ASYNC, LDLM_CANCEL_LRUR);
+	ret = ldlm_cancel_lru(ldlm_pl2ns(pl), 0, LCF_ASYNC, LDLM_CANCEL_LRUR);
 
 out:
 	spin_lock(&pl->pl_lock);
@@ -324,7 +341,7 @@ static int ldlm_cli_pool_shrink(struct ldlm_pool *pl,
 	struct ldlm_namespace *ns;
 	int unused;
 
-	ns = container_of(pl, struct ldlm_namespace, ns_pool);
+	ns = ldlm_pl2ns(pl);
 
 	/*
 	 * Do not cancel locks in case lru resize is disabled for this ns.
@@ -436,7 +453,7 @@ static int lprocfs_pool_state_seq_show(struct seq_file *m, void *unused)
 	spin_lock(&pl->pl_lock);
 	slv = pl->pl_server_lock_volume;
 	clv = pl->pl_client_lock_volume;
-	limit = atomic_read(&pl->pl_limit);
+	limit = ldlm_pool_get_limit(pl);
 	granted = atomic_read(&pl->pl_granted);
 	grant_rate = atomic_read(&pl->pl_grant_rate);
 	cancel_rate = atomic_read(&pl->pl_cancel_rate);
@@ -541,8 +558,7 @@ static struct kobj_type ldlm_pl_ktype = {
 
 static int ldlm_pool_sysfs_init(struct ldlm_pool *pl)
 {
-	struct ldlm_namespace *ns = container_of(pl, struct ldlm_namespace,
-						 ns_pool);
+	struct ldlm_namespace *ns = ldlm_pl2ns(pl);
 	int err;
 
 	init_completion(&pl->pl_kobj_unregister);
@@ -554,8 +570,7 @@ static int ldlm_pool_sysfs_init(struct ldlm_pool *pl)
 
 static int ldlm_pool_debugfs_init(struct ldlm_pool *pl)
 {
-	struct ldlm_namespace *ns = container_of(pl, struct ldlm_namespace,
-						 ns_pool);
+	struct ldlm_namespace *ns = ldlm_pl2ns(pl);
 	struct dentry *debugfs_ns_parent;
 	struct lprocfs_vars pool_vars[2];
 	char *var_name = NULL;
@@ -670,7 +685,7 @@ int ldlm_pool_init(struct ldlm_pool *pl, struct ldlm_namespace *ns,
 	snprintf(pl->pl_name, sizeof(pl->pl_name), "ldlm-pool-%s-%d",
 		 ldlm_ns_name(ns), idx);
 
-	atomic_set(&pl->pl_limit, 1);
+	ldlm_pool_set_limit(pl, 1);
 	pl->pl_server_lock_volume = 0;
 	pl->pl_ops = &ldlm_cli_pool_ops;
 	pl->pl_recalc_period = LDLM_POOL_CLI_DEF_RECALC_PERIOD;

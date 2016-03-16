@@ -131,6 +131,11 @@ struct zynq_platform_data {
 static struct irq_chip zynq_gpio_level_irqchip;
 static struct irq_chip zynq_gpio_edge_irqchip;
 
+static struct zynq_gpio *to_zynq_gpio(struct gpio_chip *gc)
+{
+	return container_of(gc, struct zynq_gpio, chip);
+}
+
 /**
  * zynq_gpio_get_bank_pin - Get the bank number and pin number within that bank
  * for a given pin in the GPIO device
@@ -178,7 +183,7 @@ static int zynq_gpio_get_value(struct gpio_chip *chip, unsigned int pin)
 {
 	u32 data;
 	unsigned int bank_num, bank_pin_num;
-	struct zynq_gpio *gpio = gpiochip_get_data(chip);
+	struct zynq_gpio *gpio = to_zynq_gpio(chip);
 
 	zynq_gpio_get_bank_pin(pin, &bank_num, &bank_pin_num, gpio);
 
@@ -202,7 +207,7 @@ static void zynq_gpio_set_value(struct gpio_chip *chip, unsigned int pin,
 				int state)
 {
 	unsigned int reg_offset, bank_num, bank_pin_num;
-	struct zynq_gpio *gpio = gpiochip_get_data(chip);
+	struct zynq_gpio *gpio = to_zynq_gpio(chip);
 
 	zynq_gpio_get_bank_pin(pin, &bank_num, &bank_pin_num, gpio);
 
@@ -239,7 +244,7 @@ static int zynq_gpio_dir_in(struct gpio_chip *chip, unsigned int pin)
 {
 	u32 reg;
 	unsigned int bank_num, bank_pin_num;
-	struct zynq_gpio *gpio = gpiochip_get_data(chip);
+	struct zynq_gpio *gpio = to_zynq_gpio(chip);
 
 	zynq_gpio_get_bank_pin(pin, &bank_num, &bank_pin_num, gpio);
 
@@ -272,7 +277,7 @@ static int zynq_gpio_dir_out(struct gpio_chip *chip, unsigned int pin,
 {
 	u32 reg;
 	unsigned int bank_num, bank_pin_num;
-	struct zynq_gpio *gpio = gpiochip_get_data(chip);
+	struct zynq_gpio *gpio = to_zynq_gpio(chip);
 
 	zynq_gpio_get_bank_pin(pin, &bank_num, &bank_pin_num, gpio);
 
@@ -303,7 +308,7 @@ static void zynq_gpio_irq_mask(struct irq_data *irq_data)
 {
 	unsigned int device_pin_num, bank_num, bank_pin_num;
 	struct zynq_gpio *gpio =
-		gpiochip_get_data(irq_data_get_irq_chip_data(irq_data));
+		to_zynq_gpio(irq_data_get_irq_chip_data(irq_data));
 
 	device_pin_num = irq_data->hwirq;
 	zynq_gpio_get_bank_pin(device_pin_num, &bank_num, &bank_pin_num, gpio);
@@ -324,7 +329,7 @@ static void zynq_gpio_irq_unmask(struct irq_data *irq_data)
 {
 	unsigned int device_pin_num, bank_num, bank_pin_num;
 	struct zynq_gpio *gpio =
-		gpiochip_get_data(irq_data_get_irq_chip_data(irq_data));
+		to_zynq_gpio(irq_data_get_irq_chip_data(irq_data));
 
 	device_pin_num = irq_data->hwirq;
 	zynq_gpio_get_bank_pin(device_pin_num, &bank_num, &bank_pin_num, gpio);
@@ -344,7 +349,7 @@ static void zynq_gpio_irq_ack(struct irq_data *irq_data)
 {
 	unsigned int device_pin_num, bank_num, bank_pin_num;
 	struct zynq_gpio *gpio =
-		gpiochip_get_data(irq_data_get_irq_chip_data(irq_data));
+		to_zynq_gpio(irq_data_get_irq_chip_data(irq_data));
 
 	device_pin_num = irq_data->hwirq;
 	zynq_gpio_get_bank_pin(device_pin_num, &bank_num, &bank_pin_num, gpio);
@@ -395,7 +400,7 @@ static int zynq_gpio_set_irq_type(struct irq_data *irq_data, unsigned int type)
 	u32 int_type, int_pol, int_any;
 	unsigned int device_pin_num, bank_num, bank_pin_num;
 	struct zynq_gpio *gpio =
-		gpiochip_get_data(irq_data_get_irq_chip_data(irq_data));
+		to_zynq_gpio(irq_data_get_irq_chip_data(irq_data));
 
 	device_pin_num = irq_data->hwirq;
 	zynq_gpio_get_bank_pin(device_pin_num, &bank_num, &bank_pin_num, gpio);
@@ -459,7 +464,7 @@ static int zynq_gpio_set_irq_type(struct irq_data *irq_data, unsigned int type)
 static int zynq_gpio_set_wake(struct irq_data *data, unsigned int on)
 {
 	struct zynq_gpio *gpio =
-		gpiochip_get_data(irq_data_get_irq_chip_data(data));
+		to_zynq_gpio(irq_data_get_irq_chip_data(data));
 
 	irq_set_irq_wake(gpio->irq, on);
 
@@ -525,7 +530,7 @@ static void zynq_gpio_irqhandler(struct irq_desc *desc)
 	u32 int_sts, int_enb;
 	unsigned int bank_num;
 	struct zynq_gpio *gpio =
-		gpiochip_get_data(irq_desc_get_handler_data(desc));
+		to_zynq_gpio(irq_desc_get_handler_data(desc));
 	struct irq_chip *irqchip = irq_desc_get_chip(desc);
 
 	chained_irq_enter(irqchip, desc);
@@ -587,7 +592,7 @@ static int zynq_gpio_request(struct gpio_chip *chip, unsigned offset)
 {
 	int ret;
 
-	ret = pm_runtime_get_sync(chip->parent);
+	ret = pm_runtime_get_sync(chip->dev);
 
 	/*
 	 * If the device is already active pm_runtime_get() will return 1 on
@@ -598,7 +603,7 @@ static int zynq_gpio_request(struct gpio_chip *chip, unsigned offset)
 
 static void zynq_gpio_free(struct gpio_chip *chip, unsigned offset)
 {
-	pm_runtime_put(chip->parent);
+	pm_runtime_put(chip->dev);
 }
 
 static const struct dev_pm_ops zynq_gpio_dev_pm_ops = {
@@ -693,7 +698,7 @@ static int zynq_gpio_probe(struct platform_device *pdev)
 	chip = &gpio->chip;
 	chip->label = gpio->p_data->label;
 	chip->owner = THIS_MODULE;
-	chip->parent = &pdev->dev;
+	chip->dev = &pdev->dev;
 	chip->get = zynq_gpio_get_value;
 	chip->set = zynq_gpio_set_value;
 	chip->request = zynq_gpio_request;
@@ -703,23 +708,23 @@ static int zynq_gpio_probe(struct platform_device *pdev)
 	chip->base = -1;
 	chip->ngpio = gpio->p_data->ngpio;
 
-	/* Retrieve GPIO clock */
+	/* Enable GPIO clock */
 	gpio->clk = devm_clk_get(&pdev->dev, NULL);
 	if (IS_ERR(gpio->clk)) {
 		dev_err(&pdev->dev, "input clock not found.\n");
 		return PTR_ERR(gpio->clk);
 	}
-
-	pm_runtime_enable(&pdev->dev);
-	ret = pm_runtime_get_sync(&pdev->dev);
-	if (ret < 0)
+	ret = clk_prepare_enable(gpio->clk);
+	if (ret) {
+		dev_err(&pdev->dev, "Unable to enable clock.\n");
 		return ret;
+	}
 
 	/* report a bug if gpio chip registration fails */
-	ret = gpiochip_add_data(chip, gpio);
+	ret = gpiochip_add(chip);
 	if (ret) {
 		dev_err(&pdev->dev, "Failed to add gpio chip\n");
-		goto err_pm_put;
+		goto err_disable_clk;
 	}
 
 	/* disable interrupts for all banks */
@@ -737,14 +742,15 @@ static int zynq_gpio_probe(struct platform_device *pdev)
 	gpiochip_set_chained_irqchip(chip, &zynq_gpio_edge_irqchip, gpio->irq,
 				     zynq_gpio_irqhandler);
 
-	pm_runtime_put(&pdev->dev);
+	pm_runtime_set_active(&pdev->dev);
+	pm_runtime_enable(&pdev->dev);
 
 	return 0;
 
 err_rm_gpiochip:
 	gpiochip_remove(chip);
-err_pm_put:
-	pm_runtime_put(&pdev->dev);
+err_disable_clk:
+	clk_disable_unprepare(gpio->clk);
 
 	return ret;
 }

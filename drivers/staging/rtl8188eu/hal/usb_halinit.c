@@ -684,7 +684,7 @@ static u32 rtl8188eu_hal_init(struct adapter *Adapter)
 	struct hal_data_8188e		*haldata = GET_HAL_DATA(Adapter);
 	struct pwrctrl_priv		*pwrctrlpriv = &Adapter->pwrctrlpriv;
 	struct registry_priv	*pregistrypriv = &Adapter->registrypriv;
-	unsigned long init_start_time = jiffies;
+	u32 init_start_time = jiffies;
 
 	#define HAL_INIT_PROFILE_TAG(stage) do {} while (0)
 
@@ -903,8 +903,7 @@ HAL_INIT_PROFILE_TAG(HAL_INIT_STAGES_LCK);
 exit:
 HAL_INIT_PROFILE_TAG(HAL_INIT_STAGES_END);
 
-	DBG_88E("%s in %dms\n", __func__,
-		jiffies_to_msecs(jiffies - init_start_time));
+	DBG_88E("%s in %dms\n", __func__, rtw_get_passing_time_ms(init_start_time));
 
 
 	return status;
@@ -1150,15 +1149,14 @@ static void _ReadRFType(struct adapter *Adapter)
 
 static void _ReadAdapterInfo8188EU(struct adapter *Adapter)
 {
-	unsigned long start = jiffies;
+	u32 start = jiffies;
 
 	MSG_88E("====> %s\n", __func__);
 
 	_ReadRFType(Adapter);/* rf_chip -> _InitRFType() */
 	_ReadPROMContent(Adapter);
 
-	MSG_88E("<==== %s in %d ms\n", __func__,
-		jiffies_to_msecs(jiffies - start));
+	MSG_88E("<==== %s in %d ms\n", __func__, rtw_get_passing_time_ms(start));
 }
 
 #define GPIO_DEBUG_PORT_NUM 0

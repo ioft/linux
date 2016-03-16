@@ -121,7 +121,7 @@ static void vsmp_send_ipi_single(int cpu, unsigned int action)
 
 #ifdef CONFIG_MIPS_GIC
 	if (gic_present) {
-		mips_smp_send_ipi_single(cpu, action);
+		gic_send_ipi_single(cpu, action);
 		return;
 	}
 #endif

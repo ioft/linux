@@ -89,7 +89,7 @@ EXPORT_SYMBOL(dcache_dir_close);
 loff_t dcache_dir_lseek(struct file *file, loff_t offset, int whence)
 {
 	struct dentry *dentry = file->f_path.dentry;
-	inode_lock(d_inode(dentry));
+	mutex_lock(&d_inode(dentry)->i_mutex);
 	switch (whence) {
 		case 1:
 			offset += file->f_pos;
@@ -97,7 +97,7 @@ loff_t dcache_dir_lseek(struct file *file, loff_t offset, int whence)
 			if (offset >= 0)
 				break;
 		default:
-			inode_unlock(d_inode(dentry));
+			mutex_unlock(&d_inode(dentry)->i_mutex);
 			return -EINVAL;
 	}
 	if (offset != file->f_pos) {
@@ -124,7 +124,7 @@ loff_t dcache_dir_lseek(struct file *file, loff_t offset, int whence)
 			spin_unlock(&dentry->d_lock);
 		}
 	}
-	inode_unlock(d_inode(dentry));
+	mutex_unlock(&d_inode(dentry)->i_mutex);
 	return offset;
 }
 EXPORT_SYMBOL(dcache_dir_lseek);
@@ -941,7 +941,7 @@ int __generic_file_fsync(struct file *file, loff_t start, loff_t end,
 	if (err)
 		return err;
 
-	inode_lock(inode);
+	mutex_lock(&inode->i_mutex);
 	ret = sync_mapping_buffers(inode->i_mapping);
 	if (!(inode->i_state & I_DIRTY_ALL))
 		goto out;
@@ -953,7 +953,7 @@ int __generic_file_fsync(struct file *file, loff_t start, loff_t end,
 		ret = err;
 
 out:
-	inode_unlock(inode);
+	mutex_unlock(&inode->i_mutex);
 	return ret;
 }
 EXPORT_SYMBOL(__generic_file_fsync);
@@ -1019,12 +1019,17 @@ int noop_fsync(struct file *file, loff_t start, loff_t end, int datasync)
 }
 EXPORT_SYMBOL(noop_fsync);
 
-/* Because kfree isn't assignment-compatible with void(void*) ;-/ */
-void kfree_link(void *p)
+void kfree_put_link(struct inode *unused, void *cookie)
 {
-	kfree(p);
+	kfree(cookie);
 }
-EXPORT_SYMBOL(kfree_link);
+EXPORT_SYMBOL(kfree_put_link);
+
+void free_page_put_link(struct inode *unused, void *cookie)
+{
+	free_page((unsigned long) cookie);
+}
+EXPORT_SYMBOL(free_page_put_link);
 
 /*
  * nop .set_page_dirty method so that people can use .page_mkwrite on
@@ -1087,15 +1092,14 @@ simple_nosetlease(struct file *filp, long arg, struct file_lock **flp,
 }
 EXPORT_SYMBOL(simple_nosetlease);
 
-const char *simple_get_link(struct dentry *dentry, struct inode *inode,
-			    struct delayed_call *done)
+const char *simple_follow_link(struct dentry *dentry, void **cookie)
 {
-	return inode->i_link;
+	return d_inode(dentry)->i_link;
 }
-EXPORT_SYMBOL(simple_get_link);
+EXPORT_SYMBOL(simple_follow_link);
 
 const struct inode_operations simple_symlink_inode_operations = {
-	.get_link = simple_get_link,
+	.follow_link = simple_follow_link,
 	.readlink = generic_readlink
 };
 EXPORT_SYMBOL(simple_symlink_inode_operations);

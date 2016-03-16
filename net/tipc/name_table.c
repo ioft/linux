@@ -42,7 +42,6 @@
 #include "subscr.h"
 #include "bcast.h"
 #include "addr.h"
-#include "node.h"
 #include <net/genetlink.h>
 
 #define TIPC_NAMETBL_SIZE 1024		/* must be a power of 2 */
@@ -678,7 +677,7 @@ struct publication *tipc_nametbl_publish(struct net *net, u32 type, u32 lower,
 	spin_unlock_bh(&tn->nametbl_lock);
 
 	if (buf)
-		tipc_node_broadcast(net, buf);
+		named_cluster_distribute(net, buf);
 	return publ;
 }
 
@@ -710,7 +709,7 @@ int tipc_nametbl_withdraw(struct net *net, u32 type, u32 lower, u32 ref,
 	spin_unlock_bh(&tn->nametbl_lock);
 
 	if (skb) {
-		tipc_node_broadcast(net, skb);
+		named_cluster_distribute(net, skb);
 		return 1;
 	}
 	return 0;

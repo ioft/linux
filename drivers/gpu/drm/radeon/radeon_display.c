@@ -403,8 +403,7 @@ static void radeon_flip_work_func(struct work_struct *__work)
 	struct drm_crtc *crtc = &radeon_crtc->base;
 	unsigned long flags;
 	int r;
-	int vpos, hpos, stat, min_udelay = 0;
-	unsigned repcnt = 4;
+	int vpos, hpos, stat, min_udelay;
 	struct drm_vblank_crtc *vblank = &crtc->dev->vblank[work->crtc_id];
 
         down_read(&rdev->exclusive_lock);
@@ -455,7 +454,7 @@ static void radeon_flip_work_func(struct work_struct *__work)
 	 * In practice this won't execute very often unless on very fast
 	 * machines because the time window for this to happen is very small.
 	 */
-	while (radeon_crtc->enabled && --repcnt) {
+	for (;;) {
 		/* GET_DISTANCE_TO_VBLANKSTART returns distance to real vblank
 		 * start in hpos, and to the "fudged earlier" vblank start in
 		 * vpos.
@@ -471,23 +470,11 @@ static void radeon_flip_work_func(struct work_struct *__work)
 			break;
 
 		/* Sleep at least until estimated real start of hw vblank */
-		min_udelay = (-hpos + 1) * max(vblank->linedur_ns / 1000, 5);
-		if (min_udelay > vblank->framedur_ns / 2000) {
-			/* Don't wait ridiculously long - something is wrong */
-			repcnt = 0;
-			break;
-		}
 		spin_unlock_irqrestore(&crtc->dev->event_lock, flags);
+		min_udelay = (-hpos + 1) * max(vblank->linedur_ns / 1000, 5);
 		usleep_range(min_udelay, 2 * min_udelay);
 		spin_lock_irqsave(&crtc->dev->event_lock, flags);
 	};
-
-	if (!repcnt)
-		DRM_DEBUG_DRIVER("Delay problem on crtc %d: min_udelay %d, "
-				 "framedur %d, linedur %d, stat %d, vpos %d, "
-				 "hpos %d\n", work->crtc_id, min_udelay,
-				 vblank->framedur_ns / 1000,
-				 vblank->linedur_ns / 1000, stat, vpos, hpos);
 
 	/* do the flip (mmio) */
 	radeon_page_flip(rdev, radeon_crtc->crtc_id, work->base);
@@ -1344,7 +1331,7 @@ static const struct drm_framebuffer_funcs radeon_fb_funcs = {
 int
 radeon_framebuffer_init(struct drm_device *dev,
 			struct radeon_framebuffer *rfb,
-			const struct drm_mode_fb_cmd2 *mode_cmd,
+			struct drm_mode_fb_cmd2 *mode_cmd,
 			struct drm_gem_object *obj)
 {
 	int ret;
@@ -1361,7 +1348,7 @@ radeon_framebuffer_init(struct drm_device *dev,
 static struct drm_framebuffer *
 radeon_user_framebuffer_create(struct drm_device *dev,
 			       struct drm_file *file_priv,
-			       const struct drm_mode_fb_cmd2 *mode_cmd)
+			       struct drm_mode_fb_cmd2 *mode_cmd)
 {
 	struct drm_gem_object *obj;
 	struct radeon_framebuffer *radeon_fb;
@@ -1683,10 +1670,8 @@ int radeon_modeset_init(struct radeon_device *rdev)
 	/* setup afmt */
 	radeon_afmt_init(rdev);
 
-	if (!list_empty(&rdev->ddev->mode_config.connector_list)) {
-		radeon_fbdev_init(rdev);
-		drm_kms_helper_poll_init(rdev->ddev);
-	}
+	radeon_fbdev_init(rdev);
+	drm_kms_helper_poll_init(rdev->ddev);
 
 	/* do pm late init */
 	ret = radeon_pm_late_init(rdev);

@@ -177,10 +177,12 @@ extern void get_iowait_load(unsigned long *nr_waiters, unsigned long *load);
 extern void calc_global_load(unsigned long ticks);
 
 #if defined(CONFIG_SMP) && defined(CONFIG_NO_HZ_COMMON)
-extern void update_cpu_load_nohz(int active);
+extern void update_cpu_load_nohz(void);
 #else
-static inline void update_cpu_load_nohz(int active) { }
+static inline void update_cpu_load_nohz(void) { }
 #endif
+
+extern unsigned long get_parent_ip(unsigned long addr);
 
 extern void dump_cpu_task(int cpu);
 
@@ -375,7 +377,6 @@ extern void scheduler_tick(void);
 extern void sched_show_task(struct task_struct *p);
 
 #ifdef CONFIG_LOCKUP_DETECTOR
-extern void touch_softlockup_watchdog_sched(void);
 extern void touch_softlockup_watchdog(void);
 extern void touch_softlockup_watchdog_sync(void);
 extern void touch_all_softlockup_watchdogs(void);
@@ -386,9 +387,6 @@ extern unsigned int  softlockup_panic;
 extern unsigned int  hardlockup_panic;
 void lockup_detector_init(void);
 #else
-static inline void touch_softlockup_watchdog_sched(void)
-{
-}
 static inline void touch_softlockup_watchdog(void)
 {
 }
@@ -717,10 +715,6 @@ struct signal_struct {
 	/* Earliest-expiration cache. */
 	struct task_cputime cputime_expires;
 
-#ifdef CONFIG_NO_HZ_FULL
-	unsigned long tick_dep_mask;
-#endif
-
 	struct list_head cpu_timers[3];
 
 	struct pid *tty_old_pgrp;
@@ -836,8 +830,6 @@ struct user_struct {
 	unsigned long mq_bytes;	/* How many bytes can be allocated to mqueue? */
 #endif
 	unsigned long locked_shm; /* How many pages of mlocked shm ? */
-	unsigned long unix_inflight;	/* How many files in flight in unix sockets */
-	atomic_long_t pipe_bufs;  /* how many pages are allocated in pipe buffers */
 
 #ifdef CONFIG_KEYS
 	struct key *uid_keyring;	/* UID specific keyring */
@@ -921,10 +913,6 @@ static inline int sched_info_on(void)
 	return 0;
 #endif
 }
-
-#ifdef CONFIG_SCHEDSTATS
-void force_schedstat_enabled(void);
-#endif
 
 enum cpu_idle_type {
 	CPU_IDLE,
@@ -1280,13 +1268,8 @@ struct sched_entity {
 #endif
 
 #ifdef CONFIG_SMP
-	/*
-	 * Per entity load average tracking.
-	 *
-	 * Put into separate cache line so it does not
-	 * collide with read-mostly values above.
-	 */
-	struct sched_avg	avg ____cacheline_aligned_in_smp;
+	/* Per entity load average tracking */
+	struct sched_avg	avg;
 #endif
 };
 
@@ -1295,8 +1278,6 @@ struct sched_rt_entity {
 	unsigned long timeout;
 	unsigned long watchdog_stamp;
 	unsigned int time_slice;
-	unsigned short on_rq;
-	unsigned short on_list;
 
 	struct sched_rt_entity *back;
 #ifdef CONFIG_RT_GROUP_SCHED
@@ -1337,6 +1318,10 @@ struct sched_dl_entity {
 	 * task has to wait for a replenishment to be performed at the
 	 * next firing of dl_timer.
 	 *
+	 * @dl_new tells if a new instance arrived. If so we must
+	 * start executing it with full runtime and reset its absolute
+	 * deadline;
+	 *
 	 * @dl_boosted tells if we are boosted due to DI. If so we are
 	 * outside bandwidth enforcement mechanism (but only until we
 	 * exit the critical section);
@@ -1344,7 +1329,7 @@ struct sched_dl_entity {
 	 * @dl_yielded tells if task gave up the cpu before consuming
 	 * all its available runtime during the last job.
 	 */
-	int dl_throttled, dl_boosted, dl_yielded;
+	int dl_throttled, dl_new, dl_boosted, dl_yielded;
 
 	/*
 	 * Bandwidth enforcement timer. Each -deadline task has its
@@ -1481,9 +1466,9 @@ struct task_struct {
 	unsigned in_iowait:1;
 #ifdef CONFIG_MEMCG
 	unsigned memcg_may_oom:1;
-#ifndef CONFIG_SLOB
-	unsigned memcg_kmem_skip_account:1;
 #endif
+#ifdef CONFIG_MEMCG_KMEM
+	unsigned memcg_kmem_skip_account:1;
 #endif
 #ifdef CONFIG_COMPAT_BRK
 	unsigned brk_randomized:1;
@@ -1535,20 +1520,13 @@ struct task_struct {
 	cputime_t gtime;
 	struct prev_cputime prev_cputime;
 #ifdef CONFIG_VIRT_CPU_ACCOUNTING_GEN
-	seqcount_t vtime_seqcount;
+	seqlock_t vtime_seqlock;
 	unsigned long long vtime_snap;
 	enum {
-		/* Task is sleeping or running in a CPU with VTIME inactive */
-		VTIME_INACTIVE = 0,
-		/* Task runs in userspace in a CPU with VTIME active */
+		VTIME_SLEEPING = 0,
 		VTIME_USER,
-		/* Task runs in kernelspace in a CPU with VTIME active */
 		VTIME_SYS,
 	} vtime_snap_whence;
-#endif
-
-#ifdef CONFIG_NO_HZ_FULL
-	unsigned long tick_dep_mask;
 #endif
 	unsigned long nvcsw, nivcsw; /* context switch counts */
 	u64 start_time;		/* monotonic time in nsec */
@@ -1651,9 +1629,6 @@ struct task_struct {
 	unsigned int lockdep_recursion;
 	struct held_lock held_locks[MAX_LOCK_DEPTH];
 	gfp_t lockdep_reclaim_gfp;
-#endif
-#ifdef CONFIG_UBSAN
-	unsigned int in_ubsan;
 #endif
 
 /* journalling filesystem info */
@@ -2364,7 +2339,10 @@ static inline void wake_up_nohz_cpu(int cpu) { }
 #endif
 
 #ifdef CONFIG_NO_HZ_FULL
+extern bool sched_can_stop_tick(void);
 extern u64 scheduler_tick_max_deferment(void);
+#else
+static inline bool sched_can_stop_tick(void) { return false; }
 #endif
 
 #ifdef CONFIG_SCHED_AUTOGROUP

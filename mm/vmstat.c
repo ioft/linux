@@ -460,7 +460,7 @@ static int fold_diff(int *diff)
  *
  * The function returns the number of global counters updated.
  */
-static int refresh_cpu_vm_stats(bool do_pagesets)
+static int refresh_cpu_vm_stats(void)
 {
 	struct zone *zone;
 	int i;
@@ -484,35 +484,33 @@ static int refresh_cpu_vm_stats(bool do_pagesets)
 #endif
 			}
 		}
+		cond_resched();
 #ifdef CONFIG_NUMA
-		if (do_pagesets) {
-			cond_resched();
-			/*
-			 * Deal with draining the remote pageset of this
-			 * processor
-			 *
-			 * Check if there are pages remaining in this pageset
-			 * if not then there is nothing to expire.
-			 */
-			if (!__this_cpu_read(p->expire) ||
+		/*
+		 * Deal with draining the remote pageset of this
+		 * processor
+		 *
+		 * Check if there are pages remaining in this pageset
+		 * if not then there is nothing to expire.
+		 */
+		if (!__this_cpu_read(p->expire) ||
 			       !__this_cpu_read(p->pcp.count))
-				continue;
+			continue;
 
-			/*
-			 * We never drain zones local to this processor.
-			 */
-			if (zone_to_nid(zone) == numa_node_id()) {
-				__this_cpu_write(p->expire, 0);
-				continue;
-			}
+		/*
+		 * We never drain zones local to this processor.
+		 */
+		if (zone_to_nid(zone) == numa_node_id()) {
+			__this_cpu_write(p->expire, 0);
+			continue;
+		}
 
-			if (__this_cpu_dec_return(p->expire))
-				continue;
+		if (__this_cpu_dec_return(p->expire))
+			continue;
 
-			if (__this_cpu_read(p->pcp.count)) {
-				drain_zone_pages(zone, this_cpu_ptr(&p->pcp));
-				changes++;
-			}
+		if (__this_cpu_read(p->pcp.count)) {
+			drain_zone_pages(zone, this_cpu_ptr(&p->pcp));
+			changes++;
 		}
 #endif
 	}
@@ -783,7 +781,6 @@ const char * const vmstat_text[] = {
 
 	"pgfault",
 	"pgmajfault",
-	"pglazyfreed",
 
 	TEXTS_FOR_ZONES("pgrefill")
 	TEXTS_FOR_ZONES("pgsteal_kswapd")
@@ -845,9 +842,7 @@ const char * const vmstat_text[] = {
 	"thp_fault_fallback",
 	"thp_collapse_alloc",
 	"thp_collapse_alloc_failed",
-	"thp_split_page",
-	"thp_split_page_failed",
-	"thp_split_pmd",
+	"thp_split",
 	"thp_zero_page_alloc",
 	"thp_zero_page_alloc_failed",
 #endif
@@ -1391,20 +1386,15 @@ static cpumask_var_t cpu_stat_off;
 
 static void vmstat_update(struct work_struct *w)
 {
-	if (refresh_cpu_vm_stats(true)) {
+	if (refresh_cpu_vm_stats()) {
 		/*
 		 * Counters were updated so we expect more updates
 		 * to occur in the future. Keep on running the
 		 * update worker thread.
-		 * If we were marked on cpu_stat_off clear the flag
-		 * so that vmstat_shepherd doesn't schedule us again.
 		 */
-		if (!cpumask_test_and_clear_cpu(smp_processor_id(),
-						cpu_stat_off)) {
-			queue_delayed_work_on(smp_processor_id(), vmstat_wq,
-				this_cpu_ptr(&vmstat_work),
-				round_jiffies_relative(sysctl_stat_interval));
-		}
+		queue_delayed_work_on(smp_processor_id(), vmstat_wq,
+			this_cpu_ptr(&vmstat_work),
+			round_jiffies_relative(sysctl_stat_interval));
 	} else {
 		/*
 		 * We did not update any counters so the app may be in
@@ -1413,15 +1403,20 @@ static void vmstat_update(struct work_struct *w)
 		 * Defer the checking for differentials to the
 		 * shepherd thread on a different processor.
 		 */
-		cpumask_set_cpu(smp_processor_id(), cpu_stat_off);
+		int r;
+		/*
+		 * Shepherd work thread does not race since it never
+		 * changes the bit if its zero but the cpu
+		 * online / off line code may race if
+		 * worker threads are still allowed during
+		 * shutdown / startup.
+		 */
+		r = cpumask_test_and_set_cpu(smp_processor_id(),
+			cpu_stat_off);
+		VM_BUG_ON(r);
 	}
 }
 
-/*
- * Switch off vmstat processing and then fold all the remaining differentials
- * until the diffs stay at zero. The function is used by NOHZ and can only be
- * invoked when tick processing is not active.
- */
 /*
  * Check if the diffs for a certain cpu indicate that
  * an update is needed.
@@ -1445,30 +1440,6 @@ static bool need_update(int cpu)
 	return false;
 }
 
-void quiet_vmstat(void)
-{
-	if (system_state != SYSTEM_RUNNING)
-		return;
-
-	/*
-	 * If we are already in hands of the shepherd then there
-	 * is nothing for us to do here.
-	 */
-	if (cpumask_test_and_set_cpu(smp_processor_id(), cpu_stat_off))
-		return;
-
-	if (!need_update(smp_processor_id()))
-		return;
-
-	/*
-	 * Just refresh counters and do not care about the pending delayed
-	 * vmstat_update. It doesn't fire that often to matter and canceling
-	 * it would be too expensive from this path.
-	 * vmstat_shepherd will take care about that for us.
-	 */
-	refresh_cpu_vm_stats(false);
-}
-
 
 /*
  * Shepherd worker thread that checks the
@@ -1478,7 +1449,7 @@ void quiet_vmstat(void)
  */
 static void vmstat_shepherd(struct work_struct *w);
 
-static DECLARE_DEFERRABLE_WORK(shepherd, vmstat_shepherd);
+static DECLARE_DELAYED_WORK(shepherd, vmstat_shepherd);
 
 static void vmstat_shepherd(struct work_struct *w)
 {
@@ -1486,25 +1457,18 @@ static void vmstat_shepherd(struct work_struct *w)
 
 	get_online_cpus();
 	/* Check processors whose vmstat worker threads have been disabled */
-	for_each_cpu(cpu, cpu_stat_off) {
-		struct delayed_work *dw = &per_cpu(vmstat_work, cpu);
+	for_each_cpu(cpu, cpu_stat_off)
+		if (need_update(cpu) &&
+			cpumask_test_and_clear_cpu(cpu, cpu_stat_off))
 
-		if (need_update(cpu)) {
-			if (cpumask_test_and_clear_cpu(cpu, cpu_stat_off))
-				queue_delayed_work_on(cpu, vmstat_wq, dw, 0);
-		} else {
-			/*
-			 * Cancel the work if quiet_vmstat has put this
-			 * cpu on cpu_stat_off because the work item might
-			 * be still scheduled
-			 */
-			cancel_delayed_work(dw);
-		}
-	}
+			queue_delayed_work_on(cpu, vmstat_wq,
+				&per_cpu(vmstat_work, cpu), 0);
+
 	put_online_cpus();
 
 	schedule_delayed_work(&shepherd,
 		round_jiffies_relative(sysctl_stat_interval));
+
 }
 
 static void __init start_shepherd_timer(void)
@@ -1512,7 +1476,7 @@ static void __init start_shepherd_timer(void)
 	int cpu;
 
 	for_each_possible_cpu(cpu)
-		INIT_DEFERRABLE_WORK(per_cpu_ptr(&vmstat_work, cpu),
+		INIT_DELAYED_WORK(per_cpu_ptr(&vmstat_work, cpu),
 			vmstat_update);
 
 	if (!alloc_cpumask_var(&cpu_stat_off, GFP_KERNEL))

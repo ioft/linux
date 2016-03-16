@@ -34,9 +34,21 @@ security_set(const struct xattr_handler *handler, struct dentry *dentry,
 	return reiserfs_xattr_set(d_inode(dentry), name, buffer, size, flags);
 }
 
-static bool security_list(struct dentry *dentry)
+static size_t security_list(const struct xattr_handler *handler,
+			    struct dentry *dentry, char *list, size_t list_len,
+			    const char *name, size_t namelen)
 {
-	return !IS_PRIVATE(d_inode(dentry));
+	const size_t len = namelen + 1;
+
+	if (IS_PRIVATE(d_inode(dentry)))
+		return 0;
+
+	if (list && len <= list_len) {
+		memcpy(list, name, namelen);
+		list[namelen] = '\0';
+	}
+
+	return len;
 }
 
 /* Initializes the security context for a new inode and returns the number

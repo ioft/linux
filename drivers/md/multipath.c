@@ -257,9 +257,6 @@ static int multipath_add_disk(struct mddev *mddev, struct md_rdev *rdev)
 			disk_stack_limits(mddev->gendisk, rdev->bdev,
 					  rdev->data_offset << 9);
 
-			err = md_integrity_add_rdev(rdev, mddev);
-			if (err)
-				break;
 			spin_lock_irq(&conf->device_lock);
 			mddev->degraded--;
 			rdev->raid_disk = path;
@@ -267,6 +264,9 @@ static int multipath_add_disk(struct mddev *mddev, struct md_rdev *rdev)
 			spin_unlock_irq(&conf->device_lock);
 			rcu_assign_pointer(p->rdev, rdev);
 			err = 0;
+			mddev_suspend(mddev);
+			md_integrity_add_rdev(rdev, mddev);
+			mddev_resume(mddev);
 			break;
 		}
 

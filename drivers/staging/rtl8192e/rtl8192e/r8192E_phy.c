@@ -90,12 +90,13 @@ void rtl92e_set_bb_reg(struct net_device *dev, u32 dwRegAddr, u32 dwBitMask,
 
 u32 rtl92e_get_bb_reg(struct net_device *dev, u32 dwRegAddr, u32 dwBitMask)
 {
-	u32 OriginalValue, BitShift;
+	u32 Ret = 0, OriginalValue, BitShift;
 
 	OriginalValue = rtl92e_readl(dev, dwRegAddr);
 	BitShift = _rtl92e_calculate_bit_shift(dwBitMask);
+	Ret = (OriginalValue & dwBitMask) >> BitShift;
 
-	return (OriginalValue & dwBitMask) >> BitShift;
+	return Ret;
 }
 
 static u32 _rtl92e_phy_rf_read(struct net_device *dev,

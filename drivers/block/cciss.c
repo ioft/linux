@@ -514,9 +514,14 @@ cciss_proc_write(struct file *file, const char __user *buf,
 	if (!buf || length > PAGE_SIZE - 1)
 		return -EINVAL;
 
-	buffer = memdup_user_nul(buf, length);
-	if (IS_ERR(buffer))
-		return PTR_ERR(buffer);
+	buffer = (char *)__get_free_page(GFP_KERNEL);
+	if (!buffer)
+		return -ENOMEM;
+
+	err = -EFAULT;
+	if (copy_from_user(buffer, buf, length))
+		goto out;
+	buffer[length] = '\0';
 
 #ifdef CONFIG_CISS_SCSI_TAPE
 	if (strncmp(ENGAGE_SCSI, buffer, sizeof ENGAGE_SCSI - 1) == 0) {
@@ -532,7 +537,8 @@ cciss_proc_write(struct file *file, const char __user *buf,
 	/* might be nice to have "disengage" too, but it's not
 	   safely possible. (only 1 module use count, lock issues.) */
 
-	kfree(buffer);
+out:
+	free_page((unsigned long)buffer);
 	return err;
 }
 
@@ -3848,7 +3854,7 @@ static void print_cfg_table(ctlr_info_t *h)
 	       readl(&(tb->HostWrite.CoalIntDelay)));
 	dev_dbg(&h->pdev->dev, "   Coalesce Interrupt Count = 0x%x\n",
 	       readl(&(tb->HostWrite.CoalIntCount)));
-	dev_dbg(&h->pdev->dev, "   Max outstanding commands = 0x%x\n",
+	dev_dbg(&h->pdev->dev, "   Max outstanding commands = 0x%d\n",
 	       readl(&(tb->CmdsOutMax)));
 	dev_dbg(&h->pdev->dev, "   Bus Types = 0x%x\n",
 		readl(&(tb->BusTypes)));

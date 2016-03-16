@@ -124,10 +124,10 @@ static struct dentry *reconnect_one(struct vfsmount *mnt,
 	int err;
 
 	parent = ERR_PTR(-EACCES);
-	inode_lock(dentry->d_inode);
+	mutex_lock(&dentry->d_inode->i_mutex);
 	if (mnt->mnt_sb->s_export_op->get_parent)
 		parent = mnt->mnt_sb->s_export_op->get_parent(dentry);
-	inode_unlock(dentry->d_inode);
+	mutex_unlock(&dentry->d_inode->i_mutex);
 
 	if (IS_ERR(parent)) {
 		dprintk("%s: get_parent of %ld failed, err %d\n",
@@ -143,9 +143,9 @@ static struct dentry *reconnect_one(struct vfsmount *mnt,
 	if (err)
 		goto out_err;
 	dprintk("%s: found name: %s\n", __func__, nbuf);
-	inode_lock(parent->d_inode);
+	mutex_lock(&parent->d_inode->i_mutex);
 	tmp = lookup_one_len(nbuf, parent, strlen(nbuf));
-	inode_unlock(parent->d_inode);
+	mutex_unlock(&parent->d_inode->i_mutex);
 	if (IS_ERR(tmp)) {
 		dprintk("%s: lookup failed: %d\n", __func__, PTR_ERR(tmp));
 		goto out_err;
@@ -503,10 +503,10 @@ struct dentry *exportfs_decode_fh(struct vfsmount *mnt, struct fid *fid,
 		 */
 		err = exportfs_get_name(mnt, target_dir, nbuf, result);
 		if (!err) {
-			inode_lock(target_dir->d_inode);
+			mutex_lock(&target_dir->d_inode->i_mutex);
 			nresult = lookup_one_len(nbuf, target_dir,
 						 strlen(nbuf));
-			inode_unlock(target_dir->d_inode);
+			mutex_unlock(&target_dir->d_inode->i_mutex);
 			if (!IS_ERR(nresult)) {
 				if (nresult->d_inode) {
 					dput(result);

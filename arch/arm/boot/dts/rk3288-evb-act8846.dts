@@ -43,26 +43,10 @@
 
 / {
 	compatible = "rockchip,rk3288-evb-act8846", "rockchip,rk3288";
+};
 
-	vcc_lcd: vcc-lcd {
-		compatible = "regulator-fixed";
-		enable-active-high;
-		gpio = <&gpio7 3 GPIO_ACTIVE_HIGH>;
-		pinctrl-names = "default";
-		pinctrl-0 = <&lcd_en>;
-		regulator-name = "vcc_lcd";
-		vin-supply = <&vcc_io>;
-	};
-
-	vcc_wl: vcc-wl {
-		compatible = "regulator-fixed";
-		enable-active-high;
-		gpio = <&gpio7 9 GPIO_ACTIVE_HIGH>;
-		pinctrl-names = "default";
-		pinctrl-0 = <&wifi_pwr>;
-		regulator-name = "vcc_wl";
-		vin-supply = <&vcc_18>;
-	};
+&cpu0 {
+	cpu0-supply = <&vdd_cpu>;
 };
 
 &i2c0 {
@@ -135,8 +119,8 @@
 
 			vdd_log: REG3 {
 				regulator-name = "VDD_LOG";
-				regulator-min-microvolt = <700000>;
-				regulator-max-microvolt = <1500000>;
+				regulator-min-microvolt = <1000000>;
+				regulator-max-microvolt = <1000000>;
 				regulator-always-on;
 			};
 
@@ -149,7 +133,7 @@
 
 			vccio_sd: REG5 {
 				regulator-name = "VCCIO_SD";
-				regulator-min-microvolt = <1800000>;
+				regulator-min-microvolt = <3300000>;
 				regulator-max-microvolt = <3300000>;
 				regulator-always-on;
 			};
@@ -168,7 +152,7 @@
 				regulator-always-on;
 			};
 
-			vcc_tp: REG8 {
+			vcca_tp: REG8 {
 				regulator-name = "VCCA_TP";
 				regulator-min-microvolt = <3300000>;
 				regulator-max-microvolt = <3300000>;
@@ -202,20 +186,6 @@
 				regulator-max-microvolt = <1800000>;
 				regulator-always-on;
 			};
-		};
-	};
-};
-
-&pinctrl {
-	lcd {
-		lcd_en: lcd-en  {
-			rockchip,pins = <7 3 RK_FUNC_GPIO &pcfg_pull_none>;
-		};
-	};
-
-	wifi {
-		wifi_pwr: wifi-pwr {
-			rockchip,pins = <7 9 RK_FUNC_GPIO &pcfg_pull_none>;
 		};
 	};
 };

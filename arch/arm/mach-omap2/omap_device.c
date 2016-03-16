@@ -32,7 +32,6 @@
 #include <linux/io.h>
 #include <linux/clk.h>
 #include <linux/clkdev.h>
-#include <linux/pm_domain.h>
 #include <linux/pm_runtime.h>
 #include <linux/of.h>
 #include <linux/notifier.h>
@@ -169,7 +168,7 @@ static int omap_device_build_from_dt(struct platform_device *pdev)
 			r->name = dev_name(&pdev->dev);
 	}
 
-	dev_pm_domain_set(&pdev->dev, &omap_device_pm_domain);
+	pdev->dev.pm_domain = &omap_device_pm_domain;
 
 	if (device_active) {
 		omap_device_enable(pdev);
@@ -181,7 +180,7 @@ odbfd_exit1:
 odbfd_exit:
 	/* if data/we are at fault.. load up a fail handler */
 	if (ret)
-		dev_pm_domain_set(&pdev->dev, &omap_device_fail_pm_domain);
+		pdev->dev.pm_domain = &omap_device_fail_pm_domain;
 
 	return ret;
 }
@@ -191,21 +190,11 @@ static int _omap_device_notifier_call(struct notifier_block *nb,
 {
 	struct platform_device *pdev = to_platform_device(dev);
 	struct omap_device *od;
-	int err;
 
 	switch (event) {
 	case BUS_NOTIFY_DEL_DEVICE:
 		if (pdev->archdata.od)
 			omap_device_delete(pdev->archdata.od);
-		break;
-	case BUS_NOTIFY_UNBOUND_DRIVER:
-		od = to_omap_device(pdev);
-		if (od && (od->_state == OMAP_DEVICE_STATE_ENABLED)) {
-			dev_info(dev, "enabled after unload, idling\n");
-			err = omap_device_idle(pdev);
-			if (err)
-				dev_err(dev, "failed to idle\n");
-		}
 		break;
 	case BUS_NOTIFY_ADD_DEVICE:
 		if (pdev->dev.of_node)
@@ -612,10 +601,8 @@ static int _od_runtime_resume(struct device *dev)
 	int ret;
 
 	ret = omap_device_enable(pdev);
-	if (ret) {
-		dev_err(dev, "use pm_runtime_put_sync_suspend() in driver?\n");
+	if (ret)
 		return ret;
-	}
 
 	return pm_generic_runtime_resume(dev);
 }
@@ -714,7 +701,7 @@ int omap_device_register(struct platform_device *pdev)
 {
 	pr_debug("omap_device: %s: registering\n", pdev->name);
 
-	dev_pm_domain_set(&pdev->dev, &omap_device_pm_domain);
+	pdev->dev.pm_domain = &omap_device_pm_domain;
 	return platform_device_add(pdev);
 }
 
@@ -882,7 +869,7 @@ static int __init omap_device_init(void)
 	bus_register_notifier(&platform_bus_type, &platform_nb);
 	return 0;
 }
-omap_postcore_initcall(omap_device_init);
+omap_core_initcall(omap_device_init);
 
 /**
  * omap_device_late_idle - idle devices without drivers

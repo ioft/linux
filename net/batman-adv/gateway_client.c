@@ -527,11 +527,10 @@ void batadv_gw_node_update(struct batadv_priv *bat_priv,
 		 * gets dereferenced.
 		 */
 		spin_lock_bh(&bat_priv->gw.list_lock);
-		if (!hlist_unhashed(&gw_node->list)) {
-			hlist_del_init_rcu(&gw_node->list);
-			batadv_gw_node_free_ref(gw_node);
-		}
+		hlist_del_init_rcu(&gw_node->list);
 		spin_unlock_bh(&bat_priv->gw.list_lock);
+
+		batadv_gw_node_free_ref(gw_node);
 
 		curr_gw = batadv_gw_get_selected_gw_node(bat_priv);
 		if (gw_node == curr_gw)

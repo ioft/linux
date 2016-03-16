@@ -30,13 +30,11 @@ static int arizona_map_irq(struct arizona *arizona, int irq)
 {
 	int ret;
 
-	if (arizona->aod_irq_chip) {
-		ret = regmap_irq_get_virq(arizona->aod_irq_chip, irq);
-		if (ret >= 0)
-			return ret;
-	}
+	ret = regmap_irq_get_virq(arizona->aod_irq_chip, irq);
+	if (ret < 0)
+		ret = regmap_irq_get_virq(arizona->irq_chip, irq);
 
-	return regmap_irq_get_virq(arizona->irq_chip, irq);
+	return ret;
 }
 
 int arizona_request_irq(struct arizona *arizona, int irq, char *name,
@@ -109,8 +107,8 @@ static irqreturn_t arizona_irq_thread(int irq, void *data)
 	do {
 		poll = false;
 
-		if (arizona->aod_irq_chip)
-			handle_nested_irq(irq_find_mapping(arizona->virq, 0));
+		/* Always handle the AoD domain */
+		handle_nested_irq(irq_find_mapping(arizona->virq, 0));
 
 		/*
 		 * Check if one of the main interrupts is asserted and only
@@ -221,15 +219,6 @@ int arizona_irq_init(struct arizona *arizona)
 		arizona->ctrlif_error = false;
 		break;
 #endif
-#ifdef CONFIG_MFD_CS47L24
-	case WM1831:
-	case CS47L24:
-		aod = NULL;
-		irq = &cs47l24_irq;
-
-		arizona->ctrlif_error = false;
-		break;
-#endif
 #ifdef CONFIG_MFD_WM8997
 	case WM8997:
 		aod = &wm8997_aod;
@@ -302,16 +291,13 @@ int arizona_irq_init(struct arizona *arizona)
 		goto err;
 	}
 
-	if (aod) {
-		ret = regmap_add_irq_chip(arizona->regmap,
-					  irq_create_mapping(arizona->virq, 0),
-					  IRQF_ONESHOT, 0, aod,
-					  &arizona->aod_irq_chip);
-		if (ret != 0) {
-			dev_err(arizona->dev,
-				"Failed to add AOD IRQs: %d\n", ret);
-			goto err;
-		}
+	ret = regmap_add_irq_chip(arizona->regmap,
+				  irq_create_mapping(arizona->virq, 0),
+				  IRQF_ONESHOT, 0, aod,
+				  &arizona->aod_irq_chip);
+	if (ret != 0) {
+		dev_err(arizona->dev, "Failed to add AOD IRQs: %d\n", ret);
+		goto err_domain;
 	}
 
 	ret = regmap_add_irq_chip(arizona->regmap,
@@ -321,6 +307,30 @@ int arizona_irq_init(struct arizona *arizona)
 	if (ret != 0) {
 		dev_err(arizona->dev, "Failed to add main IRQs: %d\n", ret);
 		goto err_aod;
+	}
+
+	/* Make sure the boot done IRQ is unmasked for resumes */
+	i = arizona_map_irq(arizona, ARIZONA_IRQ_BOOT_DONE);
+	ret = request_threaded_irq(i, NULL, arizona_boot_done, IRQF_ONESHOT,
+				   "Boot done", arizona);
+	if (ret != 0) {
+		dev_err(arizona->dev, "Failed to request boot done %d: %d\n",
+			arizona->irq, ret);
+		goto err_boot_done;
+	}
+
+	/* Handle control interface errors in the core */
+	if (arizona->ctrlif_error) {
+		i = arizona_map_irq(arizona, ARIZONA_IRQ_CTRLIF_ERR);
+		ret = request_threaded_irq(i, NULL, arizona_ctrlif_err,
+					   IRQF_ONESHOT,
+					   "Control interface error", arizona);
+		if (ret != 0) {
+			dev_err(arizona->dev,
+				"Failed to request CTRLIF_ERR %d: %d\n",
+				arizona->irq, ret);
+			goto err_ctrlif;
+		}
 	}
 
 	/* Used to emulate edge trigger and to work around broken pinmux */
@@ -352,42 +362,21 @@ int arizona_irq_init(struct arizona *arizona)
 		goto err_main_irq;
 	}
 
-	/* Make sure the boot done IRQ is unmasked for resumes */
-	i = arizona_map_irq(arizona, ARIZONA_IRQ_BOOT_DONE);
-	ret = request_threaded_irq(i, NULL, arizona_boot_done, IRQF_ONESHOT,
-				   "Boot done", arizona);
-	if (ret != 0) {
-		dev_err(arizona->dev, "Failed to request boot done %d: %d\n",
-			arizona->irq, ret);
-		goto err_boot_done;
-	}
-
-	/* Handle control interface errors in the core */
-	if (arizona->ctrlif_error) {
-		i = arizona_map_irq(arizona, ARIZONA_IRQ_CTRLIF_ERR);
-		ret = request_threaded_irq(i, NULL, arizona_ctrlif_err,
-					   IRQF_ONESHOT,
-					   "Control interface error", arizona);
-		if (ret != 0) {
-			dev_err(arizona->dev,
-				"Failed to request CTRLIF_ERR %d: %d\n",
-				arizona->irq, ret);
-			goto err_ctrlif;
-		}
-	}
-
 	return 0;
 
+err_main_irq:
+	if (arizona->ctrlif_error)
+		free_irq(arizona_map_irq(arizona, ARIZONA_IRQ_CTRLIF_ERR),
+			 arizona);
 err_ctrlif:
 	free_irq(arizona_map_irq(arizona, ARIZONA_IRQ_BOOT_DONE), arizona);
 err_boot_done:
-	free_irq(arizona->irq, arizona);
-err_main_irq:
 	regmap_del_irq_chip(irq_create_mapping(arizona->virq, 1),
 			    arizona->irq_chip);
 err_aod:
 	regmap_del_irq_chip(irq_create_mapping(arizona->virq, 0),
 			    arizona->aod_irq_chip);
+err_domain:
 err:
 	return ret;
 }

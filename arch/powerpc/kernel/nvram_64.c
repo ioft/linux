@@ -27,7 +27,6 @@
 #include <linux/slab.h>
 #include <linux/spinlock.h>
 #include <linux/kmsg_dump.h>
-#include <linux/pagemap.h>
 #include <linux/pstore.h>
 #include <linux/zlib.h>
 #include <asm/uaccess.h>
@@ -734,10 +733,24 @@ static void oops_to_nvram(struct kmsg_dumper *dumper,
 
 static loff_t dev_nvram_llseek(struct file *file, loff_t offset, int origin)
 {
+	int size;
+
 	if (ppc_md.nvram_size == NULL)
 		return -ENODEV;
-	return generic_file_llseek_size(file, offset, origin, MAX_LFS_FILESIZE,
-					ppc_md.nvram_size());
+	size = ppc_md.nvram_size();
+
+	switch (origin) {
+	case 1:
+		offset += file->f_pos;
+		break;
+	case 2:
+		offset += size;
+		break;
+	}
+	if (offset < 0)
+		return -EINVAL;
+	file->f_pos = offset;
+	return file->f_pos;
 }
 
 

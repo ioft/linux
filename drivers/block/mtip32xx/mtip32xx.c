@@ -104,9 +104,9 @@
 /* Device instance number, incremented each time a device is probed. */
 static int instance;
 
-static struct list_head online_list;
-static struct list_head removing_list;
-static spinlock_t dev_lock;
+struct list_head online_list;
+struct list_head removing_list;
+spinlock_t dev_lock;
 
 /*
  * Global variable used to hold the major block device number
@@ -173,7 +173,7 @@ static struct mtip_cmd *mtip_get_int_command(struct driver_data *dd)
 {
 	struct request *rq;
 
-	rq = blk_mq_alloc_request(dd->queue, 0, BLK_MQ_REQ_RESERVED);
+	rq = blk_mq_alloc_request(dd->queue, 0, __GFP_RECLAIM, true);
 	return blk_mq_rq_to_pdu(rq);
 }
 
@@ -2029,10 +2029,13 @@ static int exec_drive_taskfile(struct driver_data *dd,
 	}
 
 	if (taskout) {
-		outbuf = memdup_user(buf + outtotal, taskout);
-		if (IS_ERR(outbuf)) {
-			err = PTR_ERR(outbuf);
-			outbuf = NULL;
+		outbuf = kzalloc(taskout, GFP_KERNEL);
+		if (outbuf == NULL) {
+			err = -ENOMEM;
+			goto abort;
+		}
+		if (copy_from_user(outbuf, buf + outtotal, taskout)) {
+			err = -EFAULT;
 			goto abort;
 		}
 		outbuf_dma = pci_map_single(dd->pdev,
@@ -2047,10 +2050,14 @@ static int exec_drive_taskfile(struct driver_data *dd,
 	}
 
 	if (taskin) {
-		inbuf = memdup_user(buf + intotal, taskin);
-		if (IS_ERR(inbuf)) {
-			err = PTR_ERR(inbuf);
-			inbuf = NULL;
+		inbuf = kzalloc(taskin, GFP_KERNEL);
+		if (inbuf == NULL) {
+			err = -ENOMEM;
+			goto abort;
+		}
+
+		if (copy_from_user(inbuf, buf + intotal, taskin)) {
+			err = -EFAULT;
 			goto abort;
 		}
 		inbuf_dma = pci_map_single(dd->pdev,

@@ -653,7 +653,7 @@ static struct uart_ops bcm_uart_ops = {
 
 
 #ifdef CONFIG_SERIAL_BCM63XX_CONSOLE
-static void wait_for_xmitr(struct uart_port *port)
+static inline void wait_for_xmitr(struct uart_port *port)
 {
 	unsigned int tmout;
 

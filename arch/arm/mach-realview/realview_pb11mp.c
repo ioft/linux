@@ -31,7 +31,7 @@
 #include <linux/platform_data/clk-realview.h>
 #include <linux/reboot.h>
 
-#include "hardware.h"
+#include <mach/hardware.h>
 #include <asm/irq.h>
 #include <asm/mach-types.h>
 #include <asm/pgtable.h>
@@ -42,10 +42,9 @@
 #include <asm/mach/flash.h>
 #include <asm/mach/map.h>
 #include <asm/mach/time.h>
-#include <asm/outercache.h>
 
-#include "board-pb11mp.h"
-#include "irqs-pb11mp.h"
+#include <mach/board-pb11mp.h>
+#include <mach/irqs.h>
 
 #include "core.h"
 
@@ -346,11 +345,6 @@ static void __init realview_pb11mp_init(void)
 	 * Bits:  .... ...0 0111 1001 0000 .... .... ....
 	 */
 	l2x0_init(__io_address(REALVIEW_TC11MP_L220_BASE), 0x00790000, 0xfe000fff);
-	/*
-	 * due to a bug in the l220 cache controller, we must not call
-	 * the sync function. stub it out here instead!
-	 */
-	outer_cache.sync = NULL;
 #endif
 
 	realview_flash_register(realview_pb11mp_flash_resource,

@@ -69,7 +69,7 @@ static struct usb_device_descriptor gfs_dev_desc = {
 	.bLength		= sizeof gfs_dev_desc,
 	.bDescriptorType	= USB_DT_DEVICE,
 
-	/* .bcdUSB = DYNAMIC */
+	.bcdUSB			= cpu_to_le16(0x0200),
 	.bDeviceClass		= USB_CLASS_PER_INTERFACE,
 
 	.idVendor		= cpu_to_le16(GFS_VENDOR_ID),

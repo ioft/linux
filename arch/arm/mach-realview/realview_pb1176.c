@@ -34,7 +34,7 @@
 #include <linux/reboot.h>
 #include <linux/memblock.h>
 
-#include "hardware.h"
+#include <mach/hardware.h>
 #include <asm/irq.h>
 #include <asm/mach-types.h>
 #include <asm/pgtable.h>
@@ -45,8 +45,8 @@
 #include <asm/mach/map.h>
 #include <asm/mach/time.h>
 
-#include "board-pb1176.h"
-#include "irqs-pb1176.h"
+#include <mach/board-pb1176.h>
+#include <mach/irqs.h>
 
 #include "core.h"
 

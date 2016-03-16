@@ -18,14 +18,27 @@ MODULE_LICENSE("GPL v2");
 #define WEISS_CATEGORY_ID	0x00
 #define LOUD_CATEGORY_ID	0x10
 
-#define PROBE_DELAY_MS		(2 * MSEC_PER_SEC)
-
-static int check_dice_category(struct fw_unit *unit)
+static int dice_interface_check(struct fw_unit *unit)
 {
+	static const int min_values[10] = {
+		10, 0x64 / 4,
+		10, 0x18 / 4,
+		10, 0x18 / 4,
+		0, 0,
+		0, 0,
+	};
 	struct fw_device *device = fw_parent_device(unit);
 	struct fw_csr_iterator it;
-	int key, val, vendor = -1, model = -1;
-	unsigned int category;
+	int key, val, vendor = -1, model = -1, err;
+	unsigned int category, i;
+	__be32 *pointers;
+	u32 value;
+	__be32 version;
+
+	pointers = kmalloc_array(ARRAY_SIZE(min_values), sizeof(__be32),
+				 GFP_KERNEL);
+	if (pointers == NULL)
+		return -ENOMEM;
 
 	/*
 	 * Check that GUID and unit directory are constructed according to DICE
@@ -51,10 +64,51 @@ static int check_dice_category(struct fw_unit *unit)
 	else
 		category = DICE_CATEGORY_ID;
 	if (device->config_rom[3] != ((vendor << 8) | category) ||
-	    device->config_rom[4] >> 22 != model)
-		return -ENODEV;
+	    device->config_rom[4] >> 22 != model) {
+		err = -ENODEV;
+		goto end;
+	}
 
-	return 0;
+	/*
+	 * Check that the sub address spaces exist and are located inside the
+	 * private address space.  The minimum values are chosen so that all
+	 * minimally required registers are included.
+	 */
+	err = snd_fw_transaction(unit, TCODE_READ_BLOCK_REQUEST,
+				 DICE_PRIVATE_SPACE, pointers,
+				 sizeof(__be32) * ARRAY_SIZE(min_values), 0);
+	if (err < 0) {
+		err = -ENODEV;
+		goto end;
+	}
+	for (i = 0; i < ARRAY_SIZE(min_values); ++i) {
+		value = be32_to_cpu(pointers[i]);
+		if (value < min_values[i] || value >= 0x40000) {
+			err = -ENODEV;
+			goto end;
+		}
+	}
+
+	/*
+	 * Check that the implemented DICE driver specification major version
+	 * number matches.
+	 */
+	err = snd_fw_transaction(unit, TCODE_READ_QUADLET_REQUEST,
+				 DICE_PRIVATE_SPACE +
+				 be32_to_cpu(pointers[0]) * 4 + GLOBAL_VERSION,
+				 &version, 4, 0);
+	if (err < 0) {
+		err = -ENODEV;
+		goto end;
+	}
+	if ((version & cpu_to_be32(0xff000000)) != cpu_to_be32(0x01000000)) {
+		dev_err(&unit->device,
+			"unknown DICE version: 0x%08x\n", be32_to_cpu(version));
+		err = -ENODEV;
+		goto end;
+	}
+end:
+	return err;
 }
 
 static int highest_supported_mode_rate(struct snd_dice *dice,
@@ -177,16 +231,6 @@ static void dice_card_strings(struct snd_dice *dice)
 	strcpy(card->mixername, "DICE");
 }
 
-static void dice_free(struct snd_dice *dice)
-{
-	snd_dice_stream_destroy_duplex(dice);
-	snd_dice_transaction_destroy(dice);
-	fw_unit_put(dice->unit);
-
-	mutex_destroy(&dice->mutex);
-	kfree(dice);
-}
-
 /*
  * This module releases the FireWire unit data after all ALSA character devices
  * are released by applications. This is for releasing stream data or finishing
@@ -195,21 +239,39 @@ static void dice_free(struct snd_dice *dice)
  */
 static void dice_card_free(struct snd_card *card)
 {
-	dice_free(card->private_data);
+	struct snd_dice *dice = card->private_data;
+
+	snd_dice_stream_destroy_duplex(dice);
+	snd_dice_transaction_destroy(dice);
+	fw_unit_put(dice->unit);
+
+	mutex_destroy(&dice->mutex);
 }
 
-static void do_registration(struct work_struct *work)
+static int dice_probe(struct fw_unit *unit, const struct ieee1394_device_id *id)
 {
-	struct snd_dice *dice = container_of(work, struct snd_dice, dwork.work);
+	struct snd_card *card;
+	struct snd_dice *dice;
 	int err;
 
-	if (dice->registered)
-		return;
-
-	err = snd_card_new(&dice->unit->device, -1, NULL, THIS_MODULE, 0,
-			   &dice->card);
+	err = dice_interface_check(unit);
 	if (err < 0)
-		return;
+		goto end;
+
+	err = snd_card_new(&unit->device, -1, NULL, THIS_MODULE,
+			   sizeof(*dice), &card);
+	if (err < 0)
+		goto end;
+
+	dice = card->private_data;
+	dice->card = card;
+	dice->unit = fw_unit_get(unit);
+	card->private_free = dice_card_free;
+
+	spin_lock_init(&dice->lock);
+	mutex_init(&dice->mutex);
+	init_completion(&dice->clock_accepted);
+	init_waitqueue_head(&dice->hwdep_wait);
 
 	err = snd_dice_transaction_init(dice);
 	if (err < 0)
@@ -221,13 +283,7 @@ static void do_registration(struct work_struct *work)
 
 	dice_card_strings(dice);
 
-	snd_dice_create_proc(dice);
-
 	err = snd_dice_create_pcm(dice);
-	if (err < 0)
-		goto error;
-
-	err = snd_dice_create_midi(dice);
 	if (err < 0)
 		goto error;
 
@@ -235,117 +291,48 @@ static void do_registration(struct work_struct *work)
 	if (err < 0)
 		goto error;
 
-	err = snd_card_register(dice->card);
+	snd_dice_create_proc(dice);
+
+	err = snd_dice_create_midi(dice);
 	if (err < 0)
 		goto error;
 
-	/*
-	 * After registered, dice instance can be released corresponding to
-	 * releasing the sound card instance.
-	 */
-	dice->card->private_free = dice_card_free;
-	dice->card->private_data = dice;
-	dice->registered = true;
-
-	return;
-error:
-	snd_dice_transaction_destroy(dice);
-	snd_card_free(dice->card);
-	dev_info(&dice->unit->device,
-		 "Sound card registration failed: %d\n", err);
-}
-
-static void schedule_registration(struct snd_dice *dice)
-{
-	struct fw_card *fw_card = fw_parent_device(dice->unit)->card;
-	u64 now, delay;
-
-	now = get_jiffies_64();
-	delay = fw_card->reset_jiffies + msecs_to_jiffies(PROBE_DELAY_MS);
-
-	if (time_after64(delay, now))
-		delay -= now;
-	else
-		delay = 0;
-
-	mod_delayed_work(system_wq, &dice->dwork, delay);
-}
-
-static int dice_probe(struct fw_unit *unit, const struct ieee1394_device_id *id)
-{
-	struct snd_dice *dice;
-	int err;
-
-	err = check_dice_category(unit);
-	if (err < 0)
-		return -ENODEV;
-
-	/* Allocate this independent of sound card instance. */
-	dice = kzalloc(sizeof(struct snd_dice), GFP_KERNEL);
-	if (dice == NULL)
-		return -ENOMEM;
-
-	dice->unit = fw_unit_get(unit);
-	dev_set_drvdata(&unit->device, dice);
-
-	spin_lock_init(&dice->lock);
-	mutex_init(&dice->mutex);
-	init_completion(&dice->clock_accepted);
-	init_waitqueue_head(&dice->hwdep_wait);
-
 	err = snd_dice_stream_init_duplex(dice);
+	if (err < 0)
+		goto error;
+
+	err = snd_card_register(card);
 	if (err < 0) {
-		dice_free(dice);
-		return err;
+		snd_dice_stream_destroy_duplex(dice);
+		goto error;
 	}
 
-	/* Allocate and register this sound card later. */
-	INIT_DEFERRABLE_WORK(&dice->dwork, do_registration);
-	schedule_registration(dice);
-
-	return 0;
+	dev_set_drvdata(&unit->device, dice);
+end:
+	return err;
+error:
+	snd_card_free(card);
+	return err;
 }
 
 static void dice_remove(struct fw_unit *unit)
 {
 	struct snd_dice *dice = dev_get_drvdata(&unit->device);
 
-	/*
-	 * Confirm to stop the work for registration before the sound card is
-	 * going to be released. The work is not scheduled again because bus
-	 * reset handler is not called anymore.
-	 */
-	cancel_delayed_work_sync(&dice->dwork);
-
-	if (dice->registered) {
-		/* No need to wait for releasing card object in this context. */
-		snd_card_free_when_closed(dice->card);
-	} else {
-		/* Don't forget this case. */
-		dice_free(dice);
-	}
+	/* No need to wait for releasing card object in this context. */
+	snd_card_free_when_closed(dice->card);
 }
 
 static void dice_bus_reset(struct fw_unit *unit)
 {
 	struct snd_dice *dice = dev_get_drvdata(&unit->device);
 
-	/* Postpone a workqueue for deferred registration. */
-	if (!dice->registered)
-		schedule_registration(dice);
-
 	/* The handler address register becomes initialized. */
 	snd_dice_transaction_reinit(dice);
 
-	/*
-	 * After registration, userspace can start packet streaming, then this
-	 * code block works fine.
-	 */
-	if (dice->registered) {
-		mutex_lock(&dice->mutex);
-		snd_dice_stream_update_duplex(dice);
-		mutex_unlock(&dice->mutex);
-	}
+	mutex_lock(&dice->mutex);
+	snd_dice_stream_update_duplex(dice);
+	mutex_unlock(&dice->mutex);
 }
 
 #define DICE_INTERFACE	0x000001

@@ -929,7 +929,7 @@ static inline int of_get_available_child_count(const struct device_node *np)
 	return num;
 }
 
-#if defined(CONFIG_OF) && !defined(MODULE)
+#ifdef CONFIG_OF
 #define _OF_DECLARE(table, name, compat, fn, fn_type)			\
 	static const struct of_device_id __of_table_##name		\
 		__used __section(__##table##_of_table)			\

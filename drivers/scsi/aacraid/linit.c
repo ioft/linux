@@ -1318,7 +1318,7 @@ static int aac_probe_one(struct pci_dev *pdev, const struct pci_device_id *id)
 }
 
 #if (defined(CONFIG_PM))
-static void aac_release_resources(struct aac_dev *aac)
+void aac_release_resources(struct aac_dev *aac)
 {
 	int i;
 

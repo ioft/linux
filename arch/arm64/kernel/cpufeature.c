@@ -26,7 +26,6 @@
 #include <asm/cpu_ops.h>
 #include <asm/processor.h>
 #include <asm/sysreg.h>
-#include <asm/virt.h>
 
 unsigned long elf_hwcap __read_mostly;
 EXPORT_SYMBOL_GPL(elf_hwcap);
@@ -622,11 +621,6 @@ static bool has_useable_gicv3_cpuif(const struct arm64_cpu_capabilities *entry)
 	return has_sre;
 }
 
-static bool runs_at_el2(const struct arm64_cpu_capabilities *entry)
-{
-	return is_kernel_in_hyp_mode();
-}
-
 static const struct arm64_cpu_capabilities arm64_features[] = {
 	{
 		.desc = "GIC system register CPU interface",
@@ -657,11 +651,6 @@ static const struct arm64_cpu_capabilities arm64_features[] = {
 		.min_field_value = 2,
 	},
 #endif /* CONFIG_AS_LSE && CONFIG_ARM64_LSE_ATOMICS */
-	{
-		.desc = "Virtualization Host Extensions",
-		.capability = ARM64_HAS_VIRT_HOST_EXTN,
-		.matches = runs_at_el2,
-	},
 	{},
 };
 
@@ -695,7 +684,7 @@ static const struct arm64_cpu_capabilities arm64_hwcaps[] = {
 	{},
 };
 
-static void __init cap_set_hwcap(const struct arm64_cpu_capabilities *cap)
+static void cap_set_hwcap(const struct arm64_cpu_capabilities *cap)
 {
 	switch (cap->hwcap_type) {
 	case CAP_HWCAP:
@@ -740,7 +729,7 @@ static bool __maybe_unused cpus_have_hwcap(const struct arm64_cpu_capabilities *
 	return rc;
 }
 
-static void __init setup_cpu_hwcaps(void)
+static void setup_cpu_hwcaps(void)
 {
 	int i;
 	const struct arm64_cpu_capabilities *hwcaps = arm64_hwcaps;
@@ -769,8 +758,7 @@ void update_cpu_capabilities(const struct arm64_cpu_capabilities *caps,
  * Run through the enabled capabilities and enable() it on all active
  * CPUs
  */
-static void __init
-enable_cpu_capabilities(const struct arm64_cpu_capabilities *caps)
+static void enable_cpu_capabilities(const struct arm64_cpu_capabilities *caps)
 {
 	int i;
 
@@ -909,7 +897,7 @@ static inline void set_sys_caps_initialised(void)
 
 #endif	/* CONFIG_HOTPLUG_CPU */
 
-static void __init setup_feature_capabilities(void)
+static void setup_feature_capabilities(void)
 {
 	update_cpu_capabilities(arm64_features, "detected feature:");
 	enable_cpu_capabilities(arm64_features);

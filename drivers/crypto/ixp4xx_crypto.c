@@ -510,8 +510,10 @@ npe_error:
 	printk(KERN_ERR "%s not responding\n", npe_name(npe_c));
 	ret = -EIO;
 err:
-	dma_pool_destroy(ctx_pool);
-	dma_pool_destroy(buffer_pool);
+	if (ctx_pool)
+		dma_pool_destroy(ctx_pool);
+	if (buffer_pool)
+		dma_pool_destroy(buffer_pool);
 	npe_release(npe_c);
 	return ret;
 }

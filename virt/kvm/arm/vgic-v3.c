@@ -28,7 +28,6 @@
 
 #include <asm/kvm_emulate.h>
 #include <asm/kvm_arm.h>
-#include <asm/kvm_asm.h>
 #include <asm/kvm_mmu.h>
 
 /* These are for GICv2 emulation only */
@@ -37,12 +36,18 @@
 #define GICH_LR_PHYSID_CPUID		(7UL << GICH_LR_PHYSID_CPUID_SHIFT)
 #define ICH_LR_VIRTUALID_MASK		(BIT_ULL(32) - 1)
 
+/*
+ * LRs are stored in reverse order in memory. make sure we index them
+ * correctly.
+ */
+#define LR_INDEX(lr)			(VGIC_V3_MAX_LRS - 1 - lr)
+
 static u32 ich_vtr_el2;
 
 static struct vgic_lr vgic_v3_get_lr(const struct kvm_vcpu *vcpu, int lr)
 {
 	struct vgic_lr lr_desc;
-	u64 val = vcpu->arch.vgic_cpu.vgic_v3.vgic_lr[lr];
+	u64 val = vcpu->arch.vgic_cpu.vgic_v3.vgic_lr[LR_INDEX(lr)];
 
 	if (vcpu->kvm->arch.vgic.vgic_model == KVM_DEV_TYPE_ARM_VGIC_V3)
 		lr_desc.irq = val & ICH_LR_VIRTUALID_MASK;
@@ -106,7 +111,7 @@ static void vgic_v3_set_lr(struct kvm_vcpu *vcpu, int lr,
 		lr_val |= ((u64)lr_desc.hwirq) << ICH_LR_PHYS_ID_SHIFT;
 	}
 
-	vcpu->arch.vgic_cpu.vgic_v3.vgic_lr[lr] = lr_val;
+	vcpu->arch.vgic_cpu.vgic_v3.vgic_lr[LR_INDEX(lr)] = lr_val;
 
 	if (!(lr_desc.state & LR_STATE_MASK))
 		vcpu->arch.vgic_cpu.vgic_v3.vgic_elrsr |= (1U << lr);
@@ -216,11 +221,6 @@ static const struct vgic_ops vgic_v3_ops = {
 
 static struct vgic_params vgic_v3_params;
 
-static void vgic_cpu_init_lrs(void *params)
-{
-	kvm_call_hyp(__vgic_v3_init_lrs);
-}
-
 /**
  * vgic_v3_probe - probe for a GICv3 compatible interrupt controller in DT
  * @node:	pointer to the DT node
@@ -288,8 +288,6 @@ int vgic_v3_probe(struct device_node *vgic_node,
 
 	kvm_info("%s@%llx IRQ%d\n", vgic_node->name,
 		 vcpu_res.start, vgic->maint_irq);
-
-	on_each_cpu(vgic_cpu_init_lrs, vgic, 1);
 
 	*ops = &vgic_v3_ops;
 	*params = vgic;

@@ -381,6 +381,5 @@
 #define __NR_userfaultfd	373
 #define __NR_membarrier		374
 #define __NR_mlock2		375
-#define __NR_copy_file_range	376
 
 #endif /* _UAPI_ASM_M68K_UNISTD_H_ */

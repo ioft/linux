@@ -152,6 +152,7 @@ static struct nand_hw_control omap_gpmc_controller = {
 
 struct omap_nand_info {
 	struct omap_nand_platform_data	*pdata;
+	struct mtd_info			mtd;
 	struct nand_chip		nand;
 	struct platform_device		*pdev;
 
@@ -175,11 +176,6 @@ struct omap_nand_info {
 	struct device			*elm_dev;
 	struct device_node		*of_node;
 };
-
-static inline struct omap_nand_info *mtd_to_omap(struct mtd_info *mtd)
-{
-	return container_of(mtd_to_nand(mtd), struct omap_nand_info, nand);
-}
 
 /**
  * omap_prefetch_enable - configures and starts prefetch transfer
@@ -251,7 +247,8 @@ static int omap_prefetch_reset(int cs, struct omap_nand_info *info)
  */
 static void omap_hwcontrol(struct mtd_info *mtd, int cmd, unsigned int ctrl)
 {
-	struct omap_nand_info *info = mtd_to_omap(mtd);
+	struct omap_nand_info *info = container_of(mtd,
+					struct omap_nand_info, mtd);
 
 	if (cmd != NAND_CMD_NONE) {
 		if (ctrl & NAND_CLE)
@@ -273,7 +270,7 @@ static void omap_hwcontrol(struct mtd_info *mtd, int cmd, unsigned int ctrl)
  */
 static void omap_read_buf8(struct mtd_info *mtd, u_char *buf, int len)
 {
-	struct nand_chip *nand = mtd_to_nand(mtd);
+	struct nand_chip *nand = mtd->priv;
 
 	ioread8_rep(nand->IO_ADDR_R, buf, len);
 }
@@ -286,7 +283,8 @@ static void omap_read_buf8(struct mtd_info *mtd, u_char *buf, int len)
  */
 static void omap_write_buf8(struct mtd_info *mtd, const u_char *buf, int len)
 {
-	struct omap_nand_info *info = mtd_to_omap(mtd);
+	struct omap_nand_info *info = container_of(mtd,
+						struct omap_nand_info, mtd);
 	u_char *p = (u_char *)buf;
 	u32	status = 0;
 
@@ -308,7 +306,7 @@ static void omap_write_buf8(struct mtd_info *mtd, const u_char *buf, int len)
  */
 static void omap_read_buf16(struct mtd_info *mtd, u_char *buf, int len)
 {
-	struct nand_chip *nand = mtd_to_nand(mtd);
+	struct nand_chip *nand = mtd->priv;
 
 	ioread16_rep(nand->IO_ADDR_R, buf, len / 2);
 }
@@ -321,7 +319,8 @@ static void omap_read_buf16(struct mtd_info *mtd, u_char *buf, int len)
  */
 static void omap_write_buf16(struct mtd_info *mtd, const u_char * buf, int len)
 {
-	struct omap_nand_info *info = mtd_to_omap(mtd);
+	struct omap_nand_info *info = container_of(mtd,
+						struct omap_nand_info, mtd);
 	u16 *p = (u16 *) buf;
 	u32	status = 0;
 	/* FIXME try bursts of writesw() or DMA ... */
@@ -345,7 +344,8 @@ static void omap_write_buf16(struct mtd_info *mtd, const u_char * buf, int len)
  */
 static void omap_read_buf_pref(struct mtd_info *mtd, u_char *buf, int len)
 {
-	struct omap_nand_info *info = mtd_to_omap(mtd);
+	struct omap_nand_info *info = container_of(mtd,
+						struct omap_nand_info, mtd);
 	uint32_t r_count = 0;
 	int ret = 0;
 	u32 *p = (u32 *)buf;
@@ -392,7 +392,8 @@ static void omap_read_buf_pref(struct mtd_info *mtd, u_char *buf, int len)
 static void omap_write_buf_pref(struct mtd_info *mtd,
 					const u_char *buf, int len)
 {
-	struct omap_nand_info *info = mtd_to_omap(mtd);
+	struct omap_nand_info *info = container_of(mtd,
+						struct omap_nand_info, mtd);
 	uint32_t w_count = 0;
 	int i = 0, ret = 0;
 	u16 *p = (u16 *)buf;
@@ -457,7 +458,8 @@ static void omap_nand_dma_callback(void *data)
 static inline int omap_nand_dma_transfer(struct mtd_info *mtd, void *addr,
 					unsigned int len, int is_write)
 {
-	struct omap_nand_info *info = mtd_to_omap(mtd);
+	struct omap_nand_info *info = container_of(mtd,
+					struct omap_nand_info, mtd);
 	struct dma_async_tx_descriptor *tx;
 	enum dma_data_direction dir = is_write ? DMA_TO_DEVICE :
 							DMA_FROM_DEVICE;
@@ -621,7 +623,8 @@ done:
  */
 static void omap_read_buf_irq_pref(struct mtd_info *mtd, u_char *buf, int len)
 {
-	struct omap_nand_info *info = mtd_to_omap(mtd);
+	struct omap_nand_info *info = container_of(mtd,
+						struct omap_nand_info, mtd);
 	int ret = 0;
 
 	if (len <= mtd->oobsize) {
@@ -668,7 +671,8 @@ out_copy:
 static void omap_write_buf_irq_pref(struct mtd_info *mtd,
 					const u_char *buf, int len)
 {
-	struct omap_nand_info *info = mtd_to_omap(mtd);
+	struct omap_nand_info *info = container_of(mtd,
+						struct omap_nand_info, mtd);
 	int ret = 0;
 	unsigned long tim, limit;
 	u32 val;
@@ -826,12 +830,12 @@ static int omap_compare_ecc(u8 *ecc_data1,	/* read from NAND memory */
 	case 1:
 		/* Uncorrectable error */
 		pr_debug("ECC UNCORRECTED_ERROR 1\n");
-		return -EBADMSG;
+		return -1;
 
 	case 11:
 		/* UN-Correctable error */
 		pr_debug("ECC UNCORRECTED_ERROR B\n");
-		return -EBADMSG;
+		return -1;
 
 	case 12:
 		/* Correctable error */
@@ -861,7 +865,7 @@ static int omap_compare_ecc(u8 *ecc_data1,	/* read from NAND memory */
 				return 0;
 		}
 		pr_debug("UNCORRECTED_ERROR default\n");
-		return -EBADMSG;
+		return -1;
 	}
 }
 
@@ -882,7 +886,8 @@ static int omap_compare_ecc(u8 *ecc_data1,	/* read from NAND memory */
 static int omap_correct_data(struct mtd_info *mtd, u_char *dat,
 				u_char *read_ecc, u_char *calc_ecc)
 {
-	struct omap_nand_info *info = mtd_to_omap(mtd);
+	struct omap_nand_info *info = container_of(mtd, struct omap_nand_info,
+							mtd);
 	int blockCnt = 0, i = 0, ret = 0;
 	int stat = 0;
 
@@ -923,7 +928,8 @@ static int omap_correct_data(struct mtd_info *mtd, u_char *dat,
 static int omap_calculate_ecc(struct mtd_info *mtd, const u_char *dat,
 				u_char *ecc_code)
 {
-	struct omap_nand_info *info = mtd_to_omap(mtd);
+	struct omap_nand_info *info = container_of(mtd, struct omap_nand_info,
+							mtd);
 	u32 val;
 
 	val = readl(info->reg.gpmc_ecc_config);
@@ -947,8 +953,9 @@ static int omap_calculate_ecc(struct mtd_info *mtd, const u_char *dat,
  */
 static void omap_enable_hwecc(struct mtd_info *mtd, int mode)
 {
-	struct omap_nand_info *info = mtd_to_omap(mtd);
-	struct nand_chip *chip = mtd_to_nand(mtd);
+	struct omap_nand_info *info = container_of(mtd, struct omap_nand_info,
+							mtd);
+	struct nand_chip *chip = mtd->priv;
 	unsigned int dev_width = (chip->options & NAND_BUSWIDTH_16) ? 1 : 0;
 	u32 val;
 
@@ -994,8 +1001,9 @@ static void omap_enable_hwecc(struct mtd_info *mtd, int mode)
  */
 static int omap_wait(struct mtd_info *mtd, struct nand_chip *chip)
 {
-	struct nand_chip *this = mtd_to_nand(mtd);
-	struct omap_nand_info *info = mtd_to_omap(mtd);
+	struct nand_chip *this = mtd->priv;
+	struct omap_nand_info *info = container_of(mtd, struct omap_nand_info,
+							mtd);
 	unsigned long timeo = jiffies;
 	int status, state = this->state;
 
@@ -1023,7 +1031,8 @@ static int omap_wait(struct mtd_info *mtd, struct nand_chip *chip)
 static int omap_dev_ready(struct mtd_info *mtd)
 {
 	unsigned int val = 0;
-	struct omap_nand_info *info = mtd_to_omap(mtd);
+	struct omap_nand_info *info = container_of(mtd, struct omap_nand_info,
+							mtd);
 
 	val = readl(info->reg.gpmc_status);
 
@@ -1049,9 +1058,10 @@ static void __maybe_unused omap_enable_hwecc_bch(struct mtd_info *mtd, int mode)
 {
 	unsigned int bch_type;
 	unsigned int dev_width, nsectors;
-	struct omap_nand_info *info = mtd_to_omap(mtd);
+	struct omap_nand_info *info = container_of(mtd, struct omap_nand_info,
+						   mtd);
 	enum omap_ecc ecc_opt = info->ecc_opt;
-	struct nand_chip *chip = mtd_to_nand(mtd);
+	struct nand_chip *chip = mtd->priv;
 	u32 val, wr_mode;
 	unsigned int ecc_size1, ecc_size0;
 
@@ -1152,7 +1162,8 @@ static u8  bch8_polynomial[] = {0xef, 0x51, 0x2e, 0x09, 0xed, 0x93, 0x9a, 0xc2,
 static int __maybe_unused omap_calculate_ecc_bch(struct mtd_info *mtd,
 					const u_char *dat, u_char *ecc_calc)
 {
-	struct omap_nand_info *info = mtd_to_omap(mtd);
+	struct omap_nand_info *info = container_of(mtd, struct omap_nand_info,
+						   mtd);
 	int eccbytes	= info->nand.ecc.bytes;
 	struct gpmc_nand_regs	*gpmc_regs = &info->reg;
 	u8 *ecc_code;
@@ -1323,7 +1334,8 @@ static int erased_sector_bitflips(u_char *data, u_char *oob,
 static int omap_elm_correct_data(struct mtd_info *mtd, u_char *data,
 				u_char *read_ecc, u_char *calc_ecc)
 {
-	struct omap_nand_info *info = mtd_to_omap(mtd);
+	struct omap_nand_info *info = container_of(mtd, struct omap_nand_info,
+			mtd);
 	struct nand_ecc_ctrl *ecc = &info->nand.ecc;
 	int eccsteps = info->nand.ecc.steps;
 	int i , j, stat = 0;
@@ -1651,6 +1663,7 @@ static int omap_nand_probe(struct platform_device *pdev)
 	unsigned			sig;
 	unsigned			oob_index;
 	struct resource			*res;
+	struct mtd_part_parser_data	ppdata = {};
 
 	pdata = dev_get_platdata(&pdev->dev);
 	if (pdata == NULL) {
@@ -1670,11 +1683,11 @@ static int omap_nand_probe(struct platform_device *pdev)
 	info->reg		= pdata->reg;
 	info->of_node		= pdata->of_node;
 	info->ecc_opt		= pdata->ecc_opt;
-	nand_chip		= &info->nand;
-	mtd			= nand_to_mtd(nand_chip);
+	mtd			= &info->mtd;
+	mtd->priv		= &info->nand;
 	mtd->dev.parent		= &pdev->dev;
+	nand_chip		= &info->nand;
 	nand_chip->ecc.priv	= NULL;
-	nand_set_flash_node(nand_chip, pdata->of_node);
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	nand_chip->IO_ADDR_R = devm_ioremap_resource(&pdev->dev, res);
@@ -1896,7 +1909,7 @@ static int omap_nand_probe(struct platform_device *pdev)
 				ecclayout->eccpos[ecclayout->eccbytes - 1] + 1;
 
 		err = elm_config(info->elm_dev, BCH4_ECC,
-				 mtd->writesize / nand_chip->ecc.size,
+				 info->mtd.writesize / nand_chip->ecc.size,
 				 nand_chip->ecc.size, nand_chip->ecc.bytes);
 		if (err < 0)
 			goto return_error;
@@ -1950,7 +1963,7 @@ static int omap_nand_probe(struct platform_device *pdev)
 		nand_chip->ecc.write_page	= omap_write_page_bch;
 
 		err = elm_config(info->elm_dev, BCH8_ECC,
-				 mtd->writesize / nand_chip->ecc.size,
+				 info->mtd.writesize / nand_chip->ecc.size,
 				 nand_chip->ecc.size, nand_chip->ecc.bytes);
 		if (err < 0)
 			goto return_error;
@@ -1980,7 +1993,7 @@ static int omap_nand_probe(struct platform_device *pdev)
 		nand_chip->ecc.write_page	= omap_write_page_bch;
 
 		err = elm_config(info->elm_dev, BCH16_ECC,
-				 mtd->writesize / nand_chip->ecc.size,
+				 info->mtd.writesize / nand_chip->ecc.size,
 				 nand_chip->ecc.size, nand_chip->ecc.bytes);
 		if (err < 0)
 			goto return_error;
@@ -2024,7 +2037,9 @@ scan_tail:
 		goto return_error;
 	}
 
-	mtd_device_register(mtd, pdata->parts, pdata->nr_parts);
+	ppdata.of_node = pdata->of_node;
+	mtd_device_parse_register(mtd, NULL, &ppdata, pdata->parts,
+				  pdata->nr_parts);
 
 	platform_set_drvdata(pdev, mtd);
 
@@ -2043,8 +2058,9 @@ return_error:
 static int omap_nand_remove(struct platform_device *pdev)
 {
 	struct mtd_info *mtd = platform_get_drvdata(pdev);
-	struct nand_chip *nand_chip = mtd_to_nand(mtd);
-	struct omap_nand_info *info = mtd_to_omap(mtd);
+	struct nand_chip *nand_chip = mtd->priv;
+	struct omap_nand_info *info = container_of(mtd, struct omap_nand_info,
+							mtd);
 	if (nand_chip->ecc.priv) {
 		nand_bch_free(nand_chip->ecc.priv);
 		nand_chip->ecc.priv = NULL;

@@ -3729,7 +3729,7 @@ static void dce_v10_0_encoder_add(struct amdgpu_device *adev,
 	case ENCODER_OBJECT_ID_INTERNAL_KLDSCP_DAC1:
 	case ENCODER_OBJECT_ID_INTERNAL_KLDSCP_DAC2:
 		drm_encoder_init(dev, encoder, &dce_v10_0_encoder_funcs,
-				 DRM_MODE_ENCODER_DAC, NULL);
+				 DRM_MODE_ENCODER_DAC);
 		drm_encoder_helper_add(encoder, &dce_v10_0_dac_helper_funcs);
 		break;
 	case ENCODER_OBJECT_ID_INTERNAL_KLDSCP_DVO1:
@@ -3740,15 +3740,15 @@ static void dce_v10_0_encoder_add(struct amdgpu_device *adev,
 		if (amdgpu_encoder->devices & (ATOM_DEVICE_LCD_SUPPORT)) {
 			amdgpu_encoder->rmx_type = RMX_FULL;
 			drm_encoder_init(dev, encoder, &dce_v10_0_encoder_funcs,
-					 DRM_MODE_ENCODER_LVDS, NULL);
+					 DRM_MODE_ENCODER_LVDS);
 			amdgpu_encoder->enc_priv = amdgpu_atombios_encoder_get_lcd_info(amdgpu_encoder);
 		} else if (amdgpu_encoder->devices & (ATOM_DEVICE_CRT_SUPPORT)) {
 			drm_encoder_init(dev, encoder, &dce_v10_0_encoder_funcs,
-					 DRM_MODE_ENCODER_DAC, NULL);
+					 DRM_MODE_ENCODER_DAC);
 			amdgpu_encoder->enc_priv = amdgpu_atombios_encoder_get_dig_info(amdgpu_encoder);
 		} else {
 			drm_encoder_init(dev, encoder, &dce_v10_0_encoder_funcs,
-					 DRM_MODE_ENCODER_TMDS, NULL);
+					 DRM_MODE_ENCODER_TMDS);
 			amdgpu_encoder->enc_priv = amdgpu_atombios_encoder_get_dig_info(amdgpu_encoder);
 		}
 		drm_encoder_helper_add(encoder, &dce_v10_0_dig_helper_funcs);
@@ -3766,13 +3766,13 @@ static void dce_v10_0_encoder_add(struct amdgpu_device *adev,
 		amdgpu_encoder->is_ext_encoder = true;
 		if (amdgpu_encoder->devices & (ATOM_DEVICE_LCD_SUPPORT))
 			drm_encoder_init(dev, encoder, &dce_v10_0_encoder_funcs,
-					 DRM_MODE_ENCODER_LVDS, NULL);
+					 DRM_MODE_ENCODER_LVDS);
 		else if (amdgpu_encoder->devices & (ATOM_DEVICE_CRT_SUPPORT))
 			drm_encoder_init(dev, encoder, &dce_v10_0_encoder_funcs,
-					 DRM_MODE_ENCODER_DAC, NULL);
+					 DRM_MODE_ENCODER_DAC);
 		else
 			drm_encoder_init(dev, encoder, &dce_v10_0_encoder_funcs,
-					 DRM_MODE_ENCODER_TMDS, NULL);
+					 DRM_MODE_ENCODER_TMDS);
 		drm_encoder_helper_add(encoder, &dce_v10_0_ext_helper_funcs);
 		break;
 	}

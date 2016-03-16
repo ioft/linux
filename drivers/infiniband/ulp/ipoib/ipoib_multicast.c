@@ -106,7 +106,7 @@ static void __ipoib_mcast_schedule_join_thread(struct ipoib_dev_priv *priv,
 		queue_delayed_work(priv->wq, &priv->mcast_task, 0);
 }
 
-static void ipoib_mcast_free(struct ipoib_mcast *mcast)
+void ipoib_mcast_free(struct ipoib_mcast *mcast)
 {
 	struct net_device *dev = mcast->dev;
 	int tx_dropped = 0;
@@ -153,7 +153,7 @@ static struct ipoib_mcast *ipoib_mcast_alloc(struct net_device *dev,
 	return mcast;
 }
 
-static struct ipoib_mcast *__ipoib_mcast_find(struct net_device *dev, void *mgid)
+struct ipoib_mcast *__ipoib_mcast_find(struct net_device *dev, void *mgid)
 {
 	struct ipoib_dev_priv *priv = netdev_priv(dev);
 	struct rb_node *n = priv->multicast_tree.rb_node;
@@ -456,10 +456,7 @@ out_locked:
 	return status;
 }
 
-/*
- * Caller must hold 'priv->lock'
- */
-static int ipoib_mcast_join(struct net_device *dev, struct ipoib_mcast *mcast)
+static void ipoib_mcast_join(struct net_device *dev, struct ipoib_mcast *mcast)
 {
 	struct ipoib_dev_priv *priv = netdev_priv(dev);
 	struct ib_sa_multicast *multicast;
@@ -468,10 +465,6 @@ static int ipoib_mcast_join(struct net_device *dev, struct ipoib_mcast *mcast)
 	};
 	ib_sa_comp_mask comp_mask;
 	int ret = 0;
-
-	if (!priv->broadcast ||
-	    !test_bit(IPOIB_FLAG_OPER_UP, &priv->flags))
-		return -EINVAL;
 
 	ipoib_dbg_mcast(priv, "joining MGID %pI6\n", mcast->mcmember.mgid.raw);
 
@@ -532,23 +525,20 @@ static int ipoib_mcast_join(struct net_device *dev, struct ipoib_mcast *mcast)
 			rec.join_state = 4;
 #endif
 	}
-	spin_unlock_irq(&priv->lock);
 
 	multicast = ib_sa_join_multicast(&ipoib_sa_client, priv->ca, priv->port,
 					 &rec, comp_mask, GFP_KERNEL,
 					 ipoib_mcast_join_complete, mcast);
-	spin_lock_irq(&priv->lock);
 	if (IS_ERR(multicast)) {
 		ret = PTR_ERR(multicast);
 		ipoib_warn(priv, "ib_sa_join_multicast failed, status %d\n", ret);
+		spin_lock_irq(&priv->lock);
 		/* Requeue this join task with a backoff delay */
 		__ipoib_mcast_schedule_join_thread(priv, mcast, 1);
 		clear_bit(IPOIB_MCAST_FLAG_BUSY, &mcast->flags);
 		spin_unlock_irq(&priv->lock);
 		complete(&mcast->done);
-		spin_lock_irq(&priv->lock);
 	}
-	return 0;
 }
 
 void ipoib_mcast_join_task(struct work_struct *work)
@@ -630,10 +620,9 @@ void ipoib_mcast_join_task(struct work_struct *work)
 				/* Found the next unjoined group */
 				init_completion(&mcast->done);
 				set_bit(IPOIB_MCAST_FLAG_BUSY, &mcast->flags);
-				if (ipoib_mcast_join(dev, mcast)) {
-					spin_unlock_irq(&priv->lock);
-					return;
-				}
+				spin_unlock_irq(&priv->lock);
+				ipoib_mcast_join(dev, mcast);
+				spin_lock_irq(&priv->lock);
 			} else if (!delay_until ||
 				 time_before(mcast->delay_until, delay_until))
 				delay_until = mcast->delay_until;
@@ -652,9 +641,10 @@ out:
 	if (mcast) {
 		init_completion(&mcast->done);
 		set_bit(IPOIB_MCAST_FLAG_BUSY, &mcast->flags);
-		ipoib_mcast_join(dev, mcast);
 	}
 	spin_unlock_irq(&priv->lock);
+	if (mcast)
+		ipoib_mcast_join(dev, mcast);
 }
 
 int ipoib_mcast_start_thread(struct net_device *dev)
@@ -687,7 +677,7 @@ int ipoib_mcast_stop_thread(struct net_device *dev)
 	return 0;
 }
 
-static int ipoib_mcast_leave(struct net_device *dev, struct ipoib_mcast *mcast)
+int ipoib_mcast_leave(struct net_device *dev, struct ipoib_mcast *mcast)
 {
 	struct ipoib_dev_priv *priv = netdev_priv(dev);
 	int ret = 0;
@@ -712,35 +702,6 @@ static int ipoib_mcast_leave(struct net_device *dev, struct ipoib_mcast *mcast)
 			  "SENDONLY join\n");
 
 	return 0;
-}
-
-/*
- * Check if the multicast group is sendonly. If so remove it from the maps
- * and add to the remove list
- */
-void ipoib_check_and_add_mcast_sendonly(struct ipoib_dev_priv *priv, u8 *mgid,
-				struct list_head *remove_list)
-{
-	/* Is this multicast ? */
-	if (*mgid == 0xff) {
-		struct ipoib_mcast *mcast = __ipoib_mcast_find(priv->dev, mgid);
-
-		if (mcast && test_bit(IPOIB_MCAST_FLAG_SENDONLY, &mcast->flags)) {
-			list_del(&mcast->list);
-			rb_erase(&mcast->rb_node, &priv->multicast_tree);
-			list_add_tail(&mcast->list, remove_list);
-		}
-	}
-}
-
-void ipoib_mcast_remove_list(struct list_head *remove_list)
-{
-	struct ipoib_mcast *mcast, *tmcast;
-
-	list_for_each_entry_safe(mcast, tmcast, remove_list, list) {
-		ipoib_mcast_leave(mcast->dev, mcast);
-		ipoib_mcast_free(mcast);
-	}
 }
 
 void ipoib_mcast_send(struct net_device *dev, u8 *daddr, struct sk_buff *skb)
@@ -849,7 +810,10 @@ void ipoib_mcast_dev_flush(struct net_device *dev)
 		if (test_bit(IPOIB_MCAST_FLAG_BUSY, &mcast->flags))
 			wait_for_completion(&mcast->done);
 
-	ipoib_mcast_remove_list(&remove_list);
+	list_for_each_entry_safe(mcast, tmcast, &remove_list, list) {
+		ipoib_mcast_leave(dev, mcast);
+		ipoib_mcast_free(mcast);
+	}
 }
 
 static int ipoib_mcast_addr_is_valid(const u8 *addr, const u8 *broadcast)
@@ -975,7 +939,10 @@ void ipoib_mcast_restart_task(struct work_struct *work)
 		if (test_bit(IPOIB_MCAST_FLAG_BUSY, &mcast->flags))
 			wait_for_completion(&mcast->done);
 
-	ipoib_mcast_remove_list(&remove_list);
+	list_for_each_entry_safe(mcast, tmcast, &remove_list, list) {
+		ipoib_mcast_leave(mcast->dev, mcast);
+		ipoib_mcast_free(mcast);
+	}
 
 	/*
 	 * Double check that we are still up

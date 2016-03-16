@@ -12,30 +12,23 @@
 
 void __lockfunc tty_lock(struct tty_struct *tty)
 {
-	if (WARN(tty->magic != TTY_MAGIC, "L Bad %p\n", tty))
+	if (tty->magic != TTY_MAGIC) {
+		pr_err("L Bad %p\n", tty);
+		WARN_ON(1);
 		return;
+	}
 	tty_kref_get(tty);
 	mutex_lock(&tty->legacy_mutex);
 }
 EXPORT_SYMBOL(tty_lock);
 
-int tty_lock_interruptible(struct tty_struct *tty)
-{
-	int ret;
-
-	if (WARN(tty->magic != TTY_MAGIC, "L Bad %p\n", tty))
-		return -EIO;
-	tty_kref_get(tty);
-	ret = mutex_lock_interruptible(&tty->legacy_mutex);
-	if (ret)
-		tty_kref_put(tty);
-	return ret;
-}
-
 void __lockfunc tty_unlock(struct tty_struct *tty)
 {
-	if (WARN(tty->magic != TTY_MAGIC, "U Bad %p\n", tty))
+	if (tty->magic != TTY_MAGIC) {
+		pr_err("U Bad %p\n", tty);
+		WARN_ON(1);
 		return;
+	}
 	mutex_unlock(&tty->legacy_mutex);
 	tty_kref_put(tty);
 }

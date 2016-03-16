@@ -35,9 +35,14 @@ struct da9055_gpio {
 	struct gpio_chip gp;
 };
 
+static inline struct da9055_gpio *to_da9055_gpio(struct gpio_chip *chip)
+{
+	return container_of(chip, struct da9055_gpio, gp);
+}
+
 static int da9055_gpio_get(struct gpio_chip *gc, unsigned offset)
 {
-	struct da9055_gpio *gpio = gpiochip_get_data(gc);
+	struct da9055_gpio *gpio = to_da9055_gpio(gc);
 	int gpio_direction = 0;
 	int ret;
 
@@ -66,7 +71,7 @@ static int da9055_gpio_get(struct gpio_chip *gc, unsigned offset)
 
 static void da9055_gpio_set(struct gpio_chip *gc, unsigned offset, int value)
 {
-	struct da9055_gpio *gpio = gpiochip_get_data(gc);
+	struct da9055_gpio *gpio = to_da9055_gpio(gc);
 
 	da9055_reg_update(gpio->da9055,
 			DA9055_REG_GPIO_MODE0_2,
@@ -76,7 +81,7 @@ static void da9055_gpio_set(struct gpio_chip *gc, unsigned offset, int value)
 
 static int da9055_gpio_direction_input(struct gpio_chip *gc, unsigned offset)
 {
-	struct da9055_gpio *gpio = gpiochip_get_data(gc);
+	struct da9055_gpio *gpio = to_da9055_gpio(gc);
 	unsigned char reg_byte;
 
 	reg_byte = (DA9055_ACT_LOW | DA9055_GPI)
@@ -92,7 +97,7 @@ static int da9055_gpio_direction_input(struct gpio_chip *gc, unsigned offset)
 static int da9055_gpio_direction_output(struct gpio_chip *gc,
 					unsigned offset, int value)
 {
-	struct da9055_gpio *gpio = gpiochip_get_data(gc);
+	struct da9055_gpio *gpio = to_da9055_gpio(gc);
 	unsigned char reg_byte;
 	int ret;
 
@@ -114,7 +119,7 @@ static int da9055_gpio_direction_output(struct gpio_chip *gc,
 
 static int da9055_gpio_to_irq(struct gpio_chip *gc, u32 offset)
 {
-	struct da9055_gpio *gpio = gpiochip_get_data(gc);
+	struct da9055_gpio *gpio = to_da9055_gpio(gc);
 	struct da9055 *da9055 = gpio->da9055;
 
 	return regmap_irq_get_virq(da9055->irq_data,
@@ -151,7 +156,7 @@ static int da9055_gpio_probe(struct platform_device *pdev)
 	if (pdata && pdata->gpio_base)
 		gpio->gp.base = pdata->gpio_base;
 
-	ret = gpiochip_add_data(&gpio->gp, gpio);
+	ret = gpiochip_add(&gpio->gp);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "Could not register gpiochip, %d\n", ret);
 		goto err_mem;

@@ -655,7 +655,18 @@ static struct hid_driver corsair_driver = {
 	.input_mapping = corsair_input_mapping,
 };
 
-module_hid_driver(corsair_driver);
+static int __init corsair_init(void)
+{
+	return hid_register_driver(&corsair_driver);
+}
+
+static void corsair_exit(void)
+{
+	hid_unregister_driver(&corsair_driver);
+}
+
+module_init(corsair_init);
+module_exit(corsair_exit);
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Clement Vuchener");

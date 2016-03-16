@@ -415,7 +415,6 @@ __generic_file_splice_read(struct file *in, loff_t *ppos,
 			 */
 			if (!page->mapping) {
 				unlock_page(page);
-retry_lookup:
 				page = find_or_create_page(mapping, index,
 						mapping_gfp_mask(mapping));
 
@@ -440,10 +439,13 @@ retry_lookup:
 			error = mapping->a_ops->readpage(in, page);
 			if (unlikely(error)) {
 				/*
-				 * Re-lookup the page
+				 * We really should re-lookup the page here,
+				 * but it complicates things a lot. Instead
+				 * lets just do what we already stored, and
+				 * we'll get it the next time we are called.
 				 */
 				if (error == AOP_TRUNCATED_PAGE)
-					goto retry_lookup;
+					error = 0;
 
 				break;
 			}

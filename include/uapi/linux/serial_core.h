@@ -176,7 +176,7 @@
 
 #define PORT_S3C6400	84
 
-/* NWPSERIAL, now removed */
+/* NWPSERIAL */
 #define PORT_NWPSERIAL	85
 
 /* MAX3100 */

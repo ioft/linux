@@ -32,7 +32,6 @@
 #include <linux/hardirq.h>
 #include <linux/pstore.h>
 #include <linux/vmalloc.h>
-#include <linux/mm.h> /* kvfree() */
 #include <acpi/apei.h>
 
 #include "apei-internal.h"
@@ -533,7 +532,10 @@ retry:
 			return -ENOMEM;
 		memcpy(new_entries, entries,
 		       erst_record_id_cache.len * sizeof(entries[0]));
-		kvfree(entries);
+		if (erst_record_id_cache.size < PAGE_SIZE)
+			kfree(entries);
+		else
+			vfree(entries);
 		erst_record_id_cache.entries = entries = new_entries;
 		erst_record_id_cache.size = new_size;
 	}

@@ -24,7 +24,7 @@
 #include <linux/firmware.h>
 #include "drmP.h"
 #include "amdgpu.h"
-#include "fiji_smum.h"
+#include "fiji_smumgr.h"
 
 MODULE_FIRMWARE("amdgpu/fiji_smc.bin");
 

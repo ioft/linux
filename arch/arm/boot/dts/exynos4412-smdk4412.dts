@@ -41,6 +41,10 @@
 	};
 };
 
+&g2d {
+	status = "okay";
+};
+
 &keypad {
 	samsung,keypad-num-rows = <3>;
 	samsung,keypad-num-columns = <8>;

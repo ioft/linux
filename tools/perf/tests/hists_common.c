@@ -150,6 +150,7 @@ struct machine *setup_fake_machine(struct machines *machines)
 out:
 	pr_debug("Not enough memory for machine setup\n");
 	machine__delete_threads(machine);
+	machine__delete(machine);
 	return NULL;
 }
 

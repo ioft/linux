@@ -52,7 +52,7 @@
 struct rv8803_data {
 	struct i2c_client *client;
 	struct rtc_device *rtc;
-	struct mutex flags_lock;
+	spinlock_t flags_lock;
 	u8 ctrl;
 };
 
@@ -61,13 +61,13 @@ static irqreturn_t rv8803_handle_irq(int irq, void *dev_id)
 	struct i2c_client *client = dev_id;
 	struct rv8803_data *rv8803 = i2c_get_clientdata(client);
 	unsigned long events = 0;
-	int flags;
+	u8 flags;
 
-	mutex_lock(&rv8803->flags_lock);
+	spin_lock(&rv8803->flags_lock);
 
 	flags = i2c_smbus_read_byte_data(client, RV8803_FLAG);
 	if (flags <= 0) {
-		mutex_unlock(&rv8803->flags_lock);
+		spin_unlock(&rv8803->flags_lock);
 		return IRQ_NONE;
 	}
 
@@ -102,7 +102,7 @@ static irqreturn_t rv8803_handle_irq(int irq, void *dev_id)
 					  rv8803->ctrl);
 	}
 
-	mutex_unlock(&rv8803->flags_lock);
+	spin_unlock(&rv8803->flags_lock);
 
 	return IRQ_HANDLED;
 }
@@ -155,6 +155,7 @@ static int rv8803_set_time(struct device *dev, struct rtc_time *tm)
 	struct rv8803_data *rv8803 = dev_get_drvdata(dev);
 	u8 date[7];
 	int flags, ret;
+	unsigned long irqflags;
 
 	if ((tm->tm_year < 100) || (tm->tm_year > 199))
 		return -EINVAL;
@@ -172,18 +173,18 @@ static int rv8803_set_time(struct device *dev, struct rtc_time *tm)
 	if (ret < 0)
 		return ret;
 
-	mutex_lock(&rv8803->flags_lock);
+	spin_lock_irqsave(&rv8803->flags_lock, irqflags);
 
 	flags = i2c_smbus_read_byte_data(rv8803->client, RV8803_FLAG);
 	if (flags < 0) {
-		mutex_unlock(&rv8803->flags_lock);
+		spin_unlock_irqrestore(&rv8803->flags_lock, irqflags);
 		return flags;
 	}
 
 	ret = i2c_smbus_write_byte_data(rv8803->client, RV8803_FLAG,
 					flags & ~RV8803_FLAG_V2F);
 
-	mutex_unlock(&rv8803->flags_lock);
+	spin_unlock_irqrestore(&rv8803->flags_lock, irqflags);
 
 	return ret;
 }
@@ -225,6 +226,7 @@ static int rv8803_set_alarm(struct device *dev, struct rtc_wkalrm *alrm)
 	u8 alarmvals[3];
 	u8 ctrl[2];
 	int ret, err;
+	unsigned long irqflags;
 
 	/* The alarm has no seconds, round up to nearest minute */
 	if (alrm->time.tm_sec) {
@@ -234,11 +236,11 @@ static int rv8803_set_alarm(struct device *dev, struct rtc_wkalrm *alrm)
 		rtc_time64_to_tm(alarm_time, &alrm->time);
 	}
 
-	mutex_lock(&rv8803->flags_lock);
+	spin_lock_irqsave(&rv8803->flags_lock, irqflags);
 
 	ret = i2c_smbus_read_i2c_block_data(client, RV8803_FLAG, 2, ctrl);
 	if (ret != 2) {
-		mutex_unlock(&rv8803->flags_lock);
+		spin_unlock_irqrestore(&rv8803->flags_lock, irqflags);
 		return ret < 0 ? ret : -EIO;
 	}
 
@@ -251,14 +253,14 @@ static int rv8803_set_alarm(struct device *dev, struct rtc_wkalrm *alrm)
 		err = i2c_smbus_write_byte_data(rv8803->client, RV8803_CTRL,
 						rv8803->ctrl);
 		if (err) {
-			mutex_unlock(&rv8803->flags_lock);
+			spin_unlock_irqrestore(&rv8803->flags_lock, irqflags);
 			return err;
 		}
 	}
 
 	ctrl[1] &= ~RV8803_FLAG_AF;
 	err = i2c_smbus_write_byte_data(rv8803->client, RV8803_FLAG, ctrl[1]);
-	mutex_unlock(&rv8803->flags_lock);
+	spin_unlock_irqrestore(&rv8803->flags_lock, irqflags);
 	if (err)
 		return err;
 
@@ -287,6 +289,7 @@ static int rv8803_alarm_irq_enable(struct device *dev, unsigned int enabled)
 	struct i2c_client *client = to_i2c_client(dev);
 	struct rv8803_data *rv8803 = dev_get_drvdata(dev);
 	int ctrl, flags, err;
+	unsigned long irqflags;
 
 	ctrl = rv8803->ctrl;
 
@@ -302,15 +305,15 @@ static int rv8803_alarm_irq_enable(struct device *dev, unsigned int enabled)
 			ctrl &= ~RV8803_CTRL_AIE;
 	}
 
-	mutex_lock(&rv8803->flags_lock);
+	spin_lock_irqsave(&rv8803->flags_lock, irqflags);
 	flags = i2c_smbus_read_byte_data(client, RV8803_FLAG);
 	if (flags < 0) {
-		mutex_unlock(&rv8803->flags_lock);
+		spin_unlock_irqrestore(&rv8803->flags_lock, irqflags);
 		return flags;
 	}
 	flags &= ~(RV8803_FLAG_AF | RV8803_FLAG_UF);
 	err = i2c_smbus_write_byte_data(client, RV8803_FLAG, flags);
-	mutex_unlock(&rv8803->flags_lock);
+	spin_unlock_irqrestore(&rv8803->flags_lock, irqflags);
 	if (err)
 		return err;
 
@@ -330,6 +333,7 @@ static int rv8803_ioctl(struct device *dev, unsigned int cmd, unsigned long arg)
 	struct i2c_client *client = to_i2c_client(dev);
 	struct rv8803_data *rv8803 = dev_get_drvdata(dev);
 	int flags, ret = 0;
+	unsigned long irqflags;
 
 	switch (cmd) {
 	case RTC_VL_READ:
@@ -351,16 +355,16 @@ static int rv8803_ioctl(struct device *dev, unsigned int cmd, unsigned long arg)
 		return 0;
 
 	case RTC_VL_CLR:
-		mutex_lock(&rv8803->flags_lock);
+		spin_lock_irqsave(&rv8803->flags_lock, irqflags);
 		flags = i2c_smbus_read_byte_data(client, RV8803_FLAG);
 		if (flags < 0) {
-			mutex_unlock(&rv8803->flags_lock);
+			spin_unlock_irqrestore(&rv8803->flags_lock, irqflags);
 			return flags;
 		}
 
 		flags &= ~(RV8803_FLAG_V1F | RV8803_FLAG_V2F);
 		ret = i2c_smbus_write_byte_data(client, RV8803_FLAG, flags);
-		mutex_unlock(&rv8803->flags_lock);
+		spin_unlock_irqrestore(&rv8803->flags_lock, irqflags);
 		if (ret < 0)
 			return ret;
 
@@ -437,7 +441,6 @@ static int rv8803_probe(struct i2c_client *client,
 	if (!rv8803)
 		return -ENOMEM;
 
-	mutex_init(&rv8803->flags_lock);
 	rv8803->client = client;
 	i2c_set_clientdata(client, rv8803);
 
@@ -499,7 +502,6 @@ static int rv8803_remove(struct i2c_client *client)
 
 static const struct i2c_device_id rv8803_id[] = {
 	{ "rv8803", 0 },
-	{ "rx8900", 0 },
 	{ }
 };
 MODULE_DEVICE_TABLE(i2c, rv8803_id);

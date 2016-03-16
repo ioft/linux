@@ -187,7 +187,8 @@ static void __iomem *mvebu_gpioreg_level_mask(struct mvebu_gpio_chip *mvchip)
 
 static void mvebu_gpio_set(struct gpio_chip *chip, unsigned pin, int value)
 {
-	struct mvebu_gpio_chip *mvchip = gpiochip_get_data(chip);
+	struct mvebu_gpio_chip *mvchip =
+		container_of(chip, struct mvebu_gpio_chip, chip);
 	unsigned long flags;
 	u32 u;
 
@@ -203,7 +204,8 @@ static void mvebu_gpio_set(struct gpio_chip *chip, unsigned pin, int value)
 
 static int mvebu_gpio_get(struct gpio_chip *chip, unsigned pin)
 {
-	struct mvebu_gpio_chip *mvchip = gpiochip_get_data(chip);
+	struct mvebu_gpio_chip *mvchip =
+		container_of(chip, struct mvebu_gpio_chip, chip);
 	u32 u;
 
 	if (readl_relaxed(mvebu_gpioreg_io_conf(mvchip)) & (1 << pin)) {
@@ -218,7 +220,8 @@ static int mvebu_gpio_get(struct gpio_chip *chip, unsigned pin)
 
 static void mvebu_gpio_blink(struct gpio_chip *chip, unsigned pin, int value)
 {
-	struct mvebu_gpio_chip *mvchip = gpiochip_get_data(chip);
+	struct mvebu_gpio_chip *mvchip =
+		container_of(chip, struct mvebu_gpio_chip, chip);
 	unsigned long flags;
 	u32 u;
 
@@ -234,7 +237,8 @@ static void mvebu_gpio_blink(struct gpio_chip *chip, unsigned pin, int value)
 
 static int mvebu_gpio_direction_input(struct gpio_chip *chip, unsigned pin)
 {
-	struct mvebu_gpio_chip *mvchip = gpiochip_get_data(chip);
+	struct mvebu_gpio_chip *mvchip =
+		container_of(chip, struct mvebu_gpio_chip, chip);
 	unsigned long flags;
 	int ret;
 	u32 u;
@@ -257,7 +261,8 @@ static int mvebu_gpio_direction_input(struct gpio_chip *chip, unsigned pin)
 static int mvebu_gpio_direction_output(struct gpio_chip *chip, unsigned pin,
 				       int value)
 {
-	struct mvebu_gpio_chip *mvchip = gpiochip_get_data(chip);
+	struct mvebu_gpio_chip *mvchip =
+		container_of(chip, struct mvebu_gpio_chip, chip);
 	unsigned long flags;
 	int ret;
 	u32 u;
@@ -282,7 +287,8 @@ static int mvebu_gpio_direction_output(struct gpio_chip *chip, unsigned pin,
 
 static int mvebu_gpio_to_irq(struct gpio_chip *chip, unsigned pin)
 {
-	struct mvebu_gpio_chip *mvchip = gpiochip_get_data(chip);
+	struct mvebu_gpio_chip *mvchip =
+		container_of(chip, struct mvebu_gpio_chip, chip);
 	return irq_create_mapping(mvchip->domain, pin);
 }
 
@@ -488,7 +494,8 @@ static void mvebu_gpio_irq_handler(struct irq_desc *desc)
 
 static void mvebu_gpio_dbg_show(struct seq_file *s, struct gpio_chip *chip)
 {
-	struct mvebu_gpio_chip *mvchip = gpiochip_get_data(chip);
+	struct mvebu_gpio_chip *mvchip =
+		container_of(chip, struct mvebu_gpio_chip, chip);
 	u32 out, io_conf, blink, in_pol, data_in, cause, edg_msk, lvl_msk;
 	int i;
 
@@ -691,7 +698,7 @@ static int mvebu_gpio_probe(struct platform_device *pdev)
 
 	mvchip->soc_variant = soc_variant;
 	mvchip->chip.label = dev_name(&pdev->dev);
-	mvchip->chip.parent = &pdev->dev;
+	mvchip->chip.dev = &pdev->dev;
 	mvchip->chip.request = gpiochip_generic_request;
 	mvchip->chip.free = gpiochip_generic_free;
 	mvchip->chip.direction_input = mvebu_gpio_direction_input;
@@ -756,7 +763,7 @@ static int mvebu_gpio_probe(struct platform_device *pdev)
 		BUG();
 	}
 
-	gpiochip_add_data(&mvchip->chip, mvchip);
+	gpiochip_add(&mvchip->chip);
 
 	/* Some gpio controllers do not provide irq support */
 	if (!of_irq_count(np))

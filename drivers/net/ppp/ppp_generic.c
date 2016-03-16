@@ -443,14 +443,9 @@ static ssize_t ppp_read(struct file *file, char __user *buf,
 			 * network traffic (demand mode).
 			 */
 			struct ppp *ppp = PF_TO_PPP(pf);
-
-			ppp_recv_lock(ppp);
 			if (ppp->n_channels == 0 &&
-			    (ppp->flags & SC_LOOP_TRAFFIC) == 0) {
-				ppp_recv_unlock(ppp);
+			    (ppp->flags & SC_LOOP_TRAFFIC) == 0)
 				break;
-			}
-			ppp_recv_unlock(ppp);
 		}
 		ret = -EAGAIN;
 		if (file->f_flags & O_NONBLOCK)
@@ -537,12 +532,9 @@ static unsigned int ppp_poll(struct file *file, poll_table *wait)
 	else if (pf->kind == INTERFACE) {
 		/* see comment in ppp_read */
 		struct ppp *ppp = PF_TO_PPP(pf);
-
-		ppp_recv_lock(ppp);
 		if (ppp->n_channels == 0 &&
 		    (ppp->flags & SC_LOOP_TRAFFIC) == 0)
 			mask |= POLLIN | POLLRDNORM;
-		ppp_recv_unlock(ppp);
 	}
 
 	return mask;
@@ -1146,15 +1138,9 @@ static const struct net_device_ops ppp_netdev_ops = {
 	.ndo_get_stats64 = ppp_get_stats64,
 };
 
-static struct device_type ppp_type = {
-	.name = "ppp",
-};
-
 static void ppp_setup(struct net_device *dev)
 {
 	dev->netdev_ops = &ppp_netdev_ops;
-	SET_NETDEV_DEVTYPE(dev, &ppp_type);
-
 	dev->hard_header_len = PPP_HDRLEN;
 	dev->mtu = PPP_MRU;
 	dev->addr_len = 0;
@@ -2734,7 +2720,8 @@ static struct ppp *ppp_create_interface(struct net *net, int unit,
 	int ret = -ENOMEM;
 	int i;
 
-	dev = alloc_netdev(sizeof(struct ppp), "", NET_NAME_ENUM, ppp_setup);
+	dev = alloc_netdev(sizeof(struct ppp), "", NET_NAME_UNKNOWN,
+			   ppp_setup);
 	if (!dev)
 		goto out1;
 
@@ -2816,7 +2803,6 @@ static struct ppp *ppp_create_interface(struct net *net, int unit,
 
 out2:
 	mutex_unlock(&pn->all_ppp_mutex);
-	rtnl_unlock();
 	free_netdev(dev);
 out1:
 	*retp = ret;

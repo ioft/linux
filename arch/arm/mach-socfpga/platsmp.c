@@ -117,7 +117,7 @@ static int socfpga_cpu_kill(unsigned int cpu)
 	return 1;
 }
 
-static const struct smp_operations socfpga_smp_ops __initconst = {
+static struct smp_operations socfpga_smp_ops __initdata = {
 	.smp_prepare_cpus	= socfpga_smp_prepare_cpus,
 	.smp_boot_secondary	= socfpga_boot_secondary,
 #ifdef CONFIG_HOTPLUG_CPU
@@ -126,7 +126,7 @@ static const struct smp_operations socfpga_smp_ops __initconst = {
 #endif
 };
 
-static const struct smp_operations socfpga_a10_smp_ops __initconst = {
+static struct smp_operations socfpga_a10_smp_ops __initdata = {
 	.smp_prepare_cpus	= socfpga_smp_prepare_cpus,
 	.smp_boot_secondary	= socfpga_a10_boot_secondary,
 #ifdef CONFIG_HOTPLUG_CPU

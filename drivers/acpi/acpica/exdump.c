@@ -5,7 +5,7 @@
  *****************************************************************************/
 
 /*
- * Copyright (C) 2000 - 2016, Intel Corp.
+ * Copyright (C) 2000 - 2015, Intel Corp.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -508,8 +508,7 @@ acpi_ex_dump_object(union acpi_operand_object *obj_desc,
 			if (next) {
 				acpi_os_printf("(%s %2.2X)",
 					       acpi_ut_get_object_type_name
-					       (next),
-					       next->address_space.space_id);
+					       (next), next->common.type);
 
 				while (next->address_space.next) {
 					if ((next->common.type ==
@@ -521,8 +520,7 @@ acpi_ex_dump_object(union acpi_operand_object *obj_desc,
 					acpi_os_printf("->%p(%s %2.2X)", next,
 						       acpi_ut_get_object_type_name
 						       (next),
-						       next->address_space.
-						       space_id);
+						       next->common.type);
 
 					if ((next == start) || (next == data)) {
 						acpi_os_printf

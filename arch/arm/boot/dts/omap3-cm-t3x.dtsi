@@ -238,7 +238,7 @@
 		ti,debounce-tol = /bits/ 16 <10>;
 		ti,debounce-rep = /bits/ 16 <1>;
 
-		wakeup-source;
+		linux,wakeup;
 	};
 };
 

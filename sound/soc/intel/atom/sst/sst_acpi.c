@@ -40,8 +40,17 @@
 #include <acpi/acpi_bus.h>
 #include "../sst-mfld-platform.h"
 #include "../../common/sst-dsp.h"
-#include "../../common/sst-acpi.h"
 #include "sst.h"
+
+struct sst_machines {
+	char *codec_id;
+	char board[32];
+	char machine[32];
+	void (*machine_quirk)(void);
+	char firmware[FW_NAME_SIZE];
+	struct sst_platform_info *pdata;
+
+};
 
 /* LPE viewpoint addresses */
 #define SST_BYT_IRAM_PHY_START	0xff2c0000
@@ -214,16 +223,37 @@ static int sst_platform_get_resources(struct intel_sst_drv *ctx)
 	return 0;
 }
 
+static acpi_status sst_acpi_mach_match(acpi_handle handle, u32 level,
+				       void *context, void **ret)
+{
+	*(bool *)context = true;
+	return AE_OK;
+}
+
+static struct sst_machines *sst_acpi_find_machine(
+	struct sst_machines *machines)
+{
+	struct sst_machines *mach;
+	bool found = false;
+
+	for (mach = machines; mach->codec_id; mach++)
+		if (ACPI_SUCCESS(acpi_get_devices(mach->codec_id,
+						  sst_acpi_mach_match,
+						  &found, NULL)) && found)
+			return mach;
+
+	return NULL;
+}
+
 static int sst_acpi_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	int ret = 0;
 	struct intel_sst_drv *ctx;
 	const struct acpi_device_id *id;
-	struct sst_acpi_mach *mach;
+	struct sst_machines *mach;
 	struct platform_device *mdev;
 	struct platform_device *plat_dev;
-	struct sst_platform_info *pdata;
 	unsigned int dev_id;
 
 	id = acpi_match_device(dev->driver->acpi_match_table, dev);
@@ -231,13 +261,12 @@ static int sst_acpi_probe(struct platform_device *pdev)
 		return -ENODEV;
 	dev_dbg(dev, "for %s", id->id);
 
-	mach = (struct sst_acpi_mach *)id->driver_data;
+	mach = (struct sst_machines *)id->driver_data;
 	mach = sst_acpi_find_machine(mach);
 	if (mach == NULL) {
 		dev_err(dev, "No matching machine driver found\n");
 		return -ENODEV;
 	}
-	pdata = mach->pdata;
 
 	ret = kstrtouint(id->id, 16, &dev_id);
 	if (ret < 0) {
@@ -247,23 +276,16 @@ static int sst_acpi_probe(struct platform_device *pdev)
 
 	dev_dbg(dev, "ACPI device id: %x\n", dev_id);
 
-	plat_dev = platform_device_register_data(dev, pdata->platform, -1,
-						NULL, 0);
+	plat_dev = platform_device_register_data(dev, mach->pdata->platform, -1, NULL, 0);
 	if (IS_ERR(plat_dev)) {
-		dev_err(dev, "Failed to create machine device: %s\n",
-			pdata->platform);
+		dev_err(dev, "Failed to create machine device: %s\n", mach->pdata->platform);
 		return PTR_ERR(plat_dev);
 	}
 
-	/*
-	 * Create platform device for sst machine driver,
-	 * pass machine info as pdata
-	 */
-	mdev = platform_device_register_data(dev, mach->drv_name, -1,
-					(const void *)mach, sizeof(*mach));
+	/* Create platform device for sst machine driver */
+	mdev = platform_device_register_data(dev, mach->machine, -1, NULL, 0);
 	if (IS_ERR(mdev)) {
-		dev_err(dev, "Failed to create machine device: %s\n",
-			mach->drv_name);
+		dev_err(dev, "Failed to create machine device: %s\n", mach->machine);
 		return PTR_ERR(mdev);
 	}
 
@@ -272,8 +294,8 @@ static int sst_acpi_probe(struct platform_device *pdev)
 		return ret;
 
 	/* Fill sst platform data */
-	ctx->pdata = pdata;
-	strcpy(ctx->firmware_name, mach->fw_filename);
+	ctx->pdata = mach->pdata;
+	strcpy(ctx->firmware_name, mach->firmware);
 
 	ret = sst_platform_get_resources(ctx);
 	if (ret)
@@ -320,28 +342,22 @@ static int sst_acpi_remove(struct platform_device *pdev)
 	return 0;
 }
 
-static struct sst_acpi_mach sst_acpi_bytcr[] = {
-	{"10EC5640", "bytcr_rt5640", "intel/fw_sst_0f28.bin", "bytcr_rt5640", NULL,
-						&byt_rvp_platform_data },
-	{"10EC5642", "bytcr_rt5640", "intel/fw_sst_0f28.bin", "bytcr_rt5640", NULL,
-						&byt_rvp_platform_data },
-	{"INTCCFFD", "bytcr_rt5640", "intel/fw_sst_0f28.bin", "bytcr_rt5640", NULL,
-						&byt_rvp_platform_data },
-	{"10EC5651", "bytcr_rt5651", "intel/fw_sst_0f28.bin", "bytcr_rt5651", NULL,
+static struct sst_machines sst_acpi_bytcr[] = {
+	{"10EC5640", "T100", "bytt100_rt5640", NULL, "intel/fw_sst_0f28.bin",
 						&byt_rvp_platform_data },
 	{},
 };
 
 /* Cherryview-based platforms: CherryTrail and Braswell */
-static struct sst_acpi_mach sst_acpi_chv[] = {
-	{"10EC5670", "cht-bsw-rt5672", "intel/fw_sst_22a8.bin", "cht-bsw", NULL,
+static struct sst_machines sst_acpi_chv[] = {
+	{"10EC5670", "cht-bsw", "cht-bsw-rt5672", NULL, "intel/fw_sst_22a8.bin",
 						&chv_platform_data },
-	{"10EC5645", "cht-bsw-rt5645", "intel/fw_sst_22a8.bin", "cht-bsw", NULL,
+	{"10EC5645", "cht-bsw", "cht-bsw-rt5645", NULL, "intel/fw_sst_22a8.bin",
 						&chv_platform_data },
-	{"10EC5650", "cht-bsw-rt5645", "intel/fw_sst_22a8.bin", "cht-bsw", NULL,
+	{"10EC5650", "cht-bsw", "cht-bsw-rt5645", NULL, "intel/fw_sst_22a8.bin",
 						&chv_platform_data },
-	{"193C9890", "cht-bsw-max98090", "intel/fw_sst_22a8.bin", "cht-bsw", NULL,
-						&chv_platform_data },
+	{"193C9890", "cht-bsw", "cht-bsw-max98090", NULL,
+	"intel/fw_sst_22a8.bin", &chv_platform_data },
 	{},
 };
 

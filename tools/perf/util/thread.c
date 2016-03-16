@@ -19,10 +19,8 @@ int thread__init_map_groups(struct thread *thread, struct machine *machine)
 		thread->mg = map_groups__new(machine);
 	} else {
 		leader = __machine__findnew_thread(machine, pid, pid);
-		if (leader) {
+		if (leader)
 			thread->mg = map_groups__get(leader->mg);
-			thread__put(leader);
-		}
 	}
 
 	return thread->mg ? 0 : -1;
@@ -55,7 +53,7 @@ struct thread *thread__new(pid_t pid, pid_t tid)
 			goto err_thread;
 
 		list_add(&comm->list, &thread->comm_list);
-		atomic_set(&thread->refcnt, 1);
+		atomic_set(&thread->refcnt, 0);
 		RB_CLEAR_NODE(&thread->rb_node);
 	}
 
@@ -97,10 +95,6 @@ struct thread *thread__get(struct thread *thread)
 void thread__put(struct thread *thread)
 {
 	if (thread && atomic_dec_and_test(&thread->refcnt)) {
-		/*
-		 * Remove it from the dead_threads list, as last reference
-		 * is gone.
-		 */
 		list_del_init(&thread->node);
 		thread__delete(thread);
 	}

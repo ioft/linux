@@ -38,8 +38,11 @@ enum debug_region {
 #define FIRM_DBG                (1 << Firmware_debug)
 
 #if defined (WILC_DEBUGFS)
-extern atomic_t WILC_REGION;
-extern atomic_t WILC_DEBUG_LEVEL;
+int wilc_debugfs_init(void);
+void wilc_debugfs_remove(void);
+
+extern atomic_t REGION;
+extern atomic_t DEBUG_LEVEL;
 
 #define DEBUG           BIT(0)
 #define INFO            BIT(1)
@@ -48,8 +51,8 @@ extern atomic_t WILC_DEBUG_LEVEL;
 
 #define PRINT_D(region, ...)						\
 	do {								\
-		if ((atomic_read(&WILC_DEBUG_LEVEL) & DEBUG) &&	\
-		   ((atomic_read(&WILC_REGION)) & (region))) {	\
+		if ((atomic_read(&DEBUG_LEVEL) & DEBUG) &&		\
+		   ((atomic_read(&REGION)) & (region))) {		\
 			printk("DBG [%s: %d]", __func__, __LINE__);	\
 			printk(__VA_ARGS__);				\
 		}							\
@@ -57,8 +60,8 @@ extern atomic_t WILC_DEBUG_LEVEL;
 
 #define PRINT_INFO(region, ...)						\
 	do {								\
-		if ((atomic_read(&WILC_DEBUG_LEVEL) & INFO) &&	\
-		   ((atomic_read(&WILC_REGION)) & (region))) {	\
+		if ((atomic_read(&DEBUG_LEVEL) & INFO) &&		\
+		   ((atomic_read(&REGION)) & (region))) {		\
 			printk("INFO [%s]", __func__);			\
 			printk(__VA_ARGS__);				\
 		}							\
@@ -66,8 +69,8 @@ extern atomic_t WILC_DEBUG_LEVEL;
 
 #define PRINT_WRN(region, ...)						\
 	do {								\
-		if ((atomic_read(&WILC_DEBUG_LEVEL) & WRN) &&	\
-		   ((atomic_read(&WILC_REGION)) & (region))) {	\
+		if ((atomic_read(&DEBUG_LEVEL) & WRN) &&		\
+		   ((atomic_read(&REGION)) & (region))) {		\
 			printk("WRN [%s: %d]", __func__, __LINE__);	\
 			printk(__VA_ARGS__);				\
 		}							\
@@ -75,7 +78,7 @@ extern atomic_t WILC_DEBUG_LEVEL;
 
 #define PRINT_ER(...)							\
 	do {								\
-		if ((atomic_read(&WILC_DEBUG_LEVEL) & ERR)) {	\
+		if ((atomic_read(&DEBUG_LEVEL) & ERR)) {		\
 			printk("ERR [%s: %d]", __func__, __LINE__);	\
 			printk(__VA_ARGS__);				\
 		}							\
@@ -118,13 +121,14 @@ extern atomic_t WILC_DEBUG_LEVEL;
 		printk("ERR [%s: %d]", __func__, __LINE__);		\
 		printk(__VA_ARGS__);					\
 	} while (0)
-
 #endif
 
 #define FN_IN   /* PRINT_D(">>> \n") */
 #define FN_OUT  /* PRINT_D("<<<\n") */
 
+#ifdef MEMORY_STATIC
 #define LINUX_RX_SIZE	(96 * 1024)
+#endif
 #define LINUX_TX_SIZE	(64 * 1024)
 
 

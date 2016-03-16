@@ -143,7 +143,7 @@ static int msic_gpio_get(struct gpio_chip *chip, unsigned offset)
 	if (ret < 0)
 		return ret;
 
-	return !!(r & MSIC_GPIO_DIN_MASK);
+	return r & MSIC_GPIO_DIN_MASK;
 }
 
 static void msic_gpio_set(struct gpio_chip *chip, unsigned offset, int value)
@@ -179,7 +179,7 @@ static int msic_irq_type(struct irq_data *data, unsigned type)
 
 static int msic_gpio_to_irq(struct gpio_chip *chip, unsigned offset)
 {
-	struct msic_gpio *mg = gpiochip_get_data(chip);
+	struct msic_gpio *mg = container_of(chip, struct msic_gpio, chip);
 	return mg->irq_base + offset;
 }
 
@@ -293,11 +293,11 @@ static int platform_msic_gpio_probe(struct platform_device *pdev)
 	mg->chip.base = pdata->gpio_base;
 	mg->chip.ngpio = MSIC_NUM_GPIO;
 	mg->chip.can_sleep = true;
-	mg->chip.parent = dev;
+	mg->chip.dev = dev;
 
 	mutex_init(&mg->buslock);
 
-	retval = gpiochip_add_data(&mg->chip, mg);
+	retval = gpiochip_add(&mg->chip);
 	if (retval) {
 		dev_err(dev, "Adding MSIC gpio chip failed\n");
 		goto err;

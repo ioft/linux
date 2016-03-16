@@ -30,7 +30,6 @@
 #include <linux/hrtimer.h>
 #include <trace/events/fence.h>
 
-#include <nvif/cl826e.h>
 #include <nvif/notify.h>
 #include <nvif/event.h>
 

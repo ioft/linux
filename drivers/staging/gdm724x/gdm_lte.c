@@ -555,7 +555,7 @@ int gdm_lte_event_init(void)
 void gdm_lte_event_exit(void)
 {
 	if (lte_event.sock && --lte_event.ref_cnt == 0) {
-		sock_release(lte_event.sock->sk_socket);
+		netlink_exit(lte_event.sock);
 		lte_event.sock = NULL;
 	}
 }

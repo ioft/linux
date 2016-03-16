@@ -14,7 +14,6 @@
 #include <linux/init.h>
 #include <linux/debugfs.h>
 #include <asm/mce.h>
-#include <asm/uaccess.h>
 
 #include "mce-internal.h"
 
@@ -30,7 +29,7 @@
  * panic situations)
  */
 
-enum context { IN_KERNEL = 1, IN_USER = 2, IN_KERNEL_RECOV = 3 };
+enum context { IN_KERNEL = 1, IN_USER = 2 };
 enum ser { SER_REQUIRED = 1, NO_SER = 2 };
 enum exception { EXCP_CONTEXT = 1, NO_EXCP = 2 };
 
@@ -49,7 +48,6 @@ static struct severity {
 #define MCESEV(s, m, c...) { .sev = MCE_ ## s ## _SEVERITY, .msg = m, ## c }
 #define  KERNEL		.context = IN_KERNEL
 #define  USER		.context = IN_USER
-#define  KERNEL_RECOV	.context = IN_KERNEL_RECOV
 #define  SER		.ser = SER_REQUIRED
 #define  NOSER		.ser = NO_SER
 #define  EXCP		.excp = EXCP_CONTEXT
@@ -89,10 +87,6 @@ static struct severity {
 		EXCP, KERNEL, MCGMASK(MCG_STATUS_RIPV, 0)
 		),
 	MCESEV(
-		PANIC, "In kernel and no restart IP",
-		EXCP, KERNEL_RECOV, MCGMASK(MCG_STATUS_RIPV, 0)
-		),
-	MCESEV(
 		DEFERRED, "Deferred error",
 		NOSER, MASK(MCI_STATUS_UC|MCI_STATUS_DEFERRED|MCI_STATUS_POISON, MCI_STATUS_DEFERRED)
 		),
@@ -127,11 +121,6 @@ static struct severity {
 		KEEP, "Action required but unaffected thread is continuable",
 		SER, MASK(MCI_STATUS_OVER|MCI_UC_SAR|MCI_ADDR, MCI_UC_SAR|MCI_ADDR),
 		MCGMASK(MCG_STATUS_RIPV|MCG_STATUS_EIPV, MCG_STATUS_RIPV)
-		),
-	MCESEV(
-		AR, "Action required: data load in error recoverable area of kernel",
-		SER, MASK(MCI_STATUS_OVER|MCI_UC_SAR|MCI_ADDR|MCACOD, MCI_UC_SAR|MCI_ADDR|MCACOD_DATA),
-		KERNEL_RECOV
 		),
 	MCESEV(
 		AR, "Action required: data load error in a user process",
@@ -181,9 +170,6 @@ static struct severity {
 		)	/* always matches. keep at end */
 };
 
-#define mc_recoverable(mcg) (((mcg) & (MCG_STATUS_RIPV|MCG_STATUS_EIPV)) == \
-				(MCG_STATUS_RIPV|MCG_STATUS_EIPV))
-
 /*
  * If mcgstatus indicated that ip/cs on the stack were
  * no good, then "m->cs" will be zero and we will have
@@ -197,11 +183,7 @@ static struct severity {
  */
 static int error_context(struct mce *m)
 {
-	if ((m->cs & 3) == 3)
-		return IN_USER;
-	if (mc_recoverable(m->mcgstatus) && ex_has_fault_handler(m->ip))
-		return IN_KERNEL_RECOV;
-	return IN_KERNEL;
+	return ((m->cs & 3) == 3) ? IN_USER : IN_KERNEL;
 }
 
 /*
