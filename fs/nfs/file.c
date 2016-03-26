@@ -233,7 +233,7 @@ EXPORT_SYMBOL_GPL(nfs_file_mmap);
  * nfs_file_write() that a write error occurred, and hence cause it to
  * fall back to doing a synchronous write.
  */
-int
+static int
 nfs_file_fsync_commit(struct file *file, loff_t start, loff_t end, int datasync)
 {
 	struct nfs_open_context *ctx = nfs_file_open_context(file);
@@ -263,9 +263,8 @@ nfs_file_fsync_commit(struct file *file, loff_t start, loff_t end, int datasync)
 out:
 	return ret;
 }
-EXPORT_SYMBOL_GPL(nfs_file_fsync_commit);
 
-static int
+int
 nfs_file_fsync(struct file *file, loff_t start, loff_t end, int datasync)
 {
 	int ret;
@@ -273,14 +272,16 @@ nfs_file_fsync(struct file *file, loff_t start, loff_t end, int datasync)
 
 	trace_nfs_fsync_enter(inode);
 
-	nfs_inode_dio_wait(inode);
+	inode_dio_wait(inode);
 	do {
 		ret = filemap_write_and_wait_range(inode->i_mapping, start, end);
 		if (ret != 0)
 			break;
-		mutex_lock(&inode->i_mutex);
+		inode_lock(inode);
 		ret = nfs_file_fsync_commit(file, start, end, datasync);
-		mutex_unlock(&inode->i_mutex);
+		if (!ret)
+			ret = pnfs_sync_inode(inode, !!datasync);
+		inode_unlock(inode);
 		/*
 		 * If nfs_file_fsync_commit detected a server reboot, then
 		 * resend all dirty pages that might have been covered by
@@ -293,6 +294,7 @@ nfs_file_fsync(struct file *file, loff_t start, loff_t end, int datasync)
 	trace_nfs_fsync_exit(inode, ret);
 	return ret;
 }
+EXPORT_SYMBOL_GPL(nfs_file_fsync);
 
 /*
  * Decide whether a read/modify/write cycle may be more efficient
@@ -368,7 +370,7 @@ start:
 	/*
 	 * Wait for O_DIRECT to complete
 	 */
-	nfs_inode_dio_wait(mapping->host);
+	inode_dio_wait(mapping->host);
 
 	page = grab_cache_page_write_begin(mapping, index, flags);
 	if (!page)
@@ -514,7 +516,7 @@ static void nfs_check_dirty_writeback(struct page *page,
 	 * so it will not block due to pages that will shortly be freeable.
 	 */
 	nfsi = NFS_I(mapping->host);
-	if (test_bit(NFS_INO_COMMIT, &nfsi->flags)) {
+	if (atomic_read(&nfsi->commit_info.rpcs_out)) {
 		*writeback = true;
 		return;
 	}
@@ -545,7 +547,7 @@ static int nfs_launder_page(struct page *page)
 		inode->i_ino, (long long)page_offset(page));
 
 	nfs_fscache_wait_on_page_write(nfsi, page);
-	return nfs_wb_page(inode, page);
+	return nfs_wb_launder_page(inode, page);
 }
 
 static int nfs_swap_activate(struct swap_info_struct *sis, struct file *file,
@@ -756,7 +758,7 @@ do_unlk(struct file *filp, int cmd, struct file_lock *fl, int is_local)
 
 	l_ctx = nfs_get_lock_context(nfs_file_open_context(filp));
 	if (!IS_ERR(l_ctx)) {
-		status = nfs_iocounter_wait(&l_ctx->io_count);
+		status = nfs_iocounter_wait(l_ctx);
 		nfs_put_lock_context(l_ctx);
 		if (status < 0)
 			return status;

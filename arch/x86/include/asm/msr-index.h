@@ -1,7 +1,12 @@
 #ifndef _ASM_X86_MSR_INDEX_H
 #define _ASM_X86_MSR_INDEX_H
 
-/* CPU model specific register (MSR) numbers */
+/*
+ * CPU model specific register (MSR) numbers.
+ *
+ * Do not add new entries to this file unless the definitions are shared
+ * between multiple compilation units.
+ */
 
 /* x86-64 specific MSRs */
 #define MSR_EFER		0xc0000080 /* extended feature register */
@@ -230,10 +235,10 @@
 #define HWP_PACKAGE_LEVEL_REQUEST_BIT	(1<<11)
 
 /* IA32_HWP_CAPABILITIES */
-#define HWP_HIGHEST_PERF(x)		(x & 0xff)
-#define HWP_GUARANTEED_PERF(x)		((x & (0xff << 8)) >>8)
-#define HWP_MOSTEFFICIENT_PERF(x)	((x & (0xff << 16)) >>16)
-#define HWP_LOWEST_PERF(x)		((x & (0xff << 24)) >>24)
+#define HWP_HIGHEST_PERF(x)		(((x) >> 0) & 0xff)
+#define HWP_GUARANTEED_PERF(x)		(((x) >> 8) & 0xff)
+#define HWP_MOSTEFFICIENT_PERF(x)	(((x) >> 16) & 0xff)
+#define HWP_LOWEST_PERF(x)		(((x) >> 24) & 0xff)
 
 /* IA32_HWP_REQUEST */
 #define HWP_MIN_PERF(x) 		(x & 0xff)
@@ -321,6 +326,7 @@
 #define MSR_F15H_PERF_CTR		0xc0010201
 #define MSR_F15H_NB_PERF_CTL		0xc0010240
 #define MSR_F15H_NB_PERF_CTR		0xc0010241
+#define MSR_F15H_IC_CFG			0xc0011021
 
 /* Fam 10h MSRs */
 #define MSR_FAM10H_MMIO_CONF_BASE	0xc0010058

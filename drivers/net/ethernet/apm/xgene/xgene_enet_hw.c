@@ -204,6 +204,17 @@ static u32 xgene_enet_ring_len(struct xgene_enet_desc_ring *ring)
 	return num_msgs;
 }
 
+static void xgene_enet_setup_coalescing(struct xgene_enet_desc_ring *ring)
+{
+	u32 data = 0x7777;
+
+	xgene_enet_ring_wr32(ring, CSR_PBM_COAL, 0x8e);
+	xgene_enet_ring_wr32(ring, CSR_PBM_CTICK1, data);
+	xgene_enet_ring_wr32(ring, CSR_PBM_CTICK2, data << 16);
+	xgene_enet_ring_wr32(ring, CSR_THRESHOLD0_SET1, 0x40);
+	xgene_enet_ring_wr32(ring, CSR_THRESHOLD1_SET1, 0x80);
+}
+
 void xgene_enet_parse_error(struct xgene_enet_desc_ring *ring,
 			    struct xgene_enet_pdata *pdata,
 			    enum xgene_enet_err_code status)
@@ -869,7 +880,7 @@ void xgene_enet_mdio_remove(struct xgene_enet_pdata *pdata)
 	pdata->mdio_bus = NULL;
 }
 
-struct xgene_mac_ops xgene_gmac_ops = {
+const struct xgene_mac_ops xgene_gmac_ops = {
 	.init = xgene_gmac_init,
 	.reset = xgene_gmac_reset,
 	.rx_enable = xgene_gmac_rx_enable,
@@ -879,7 +890,7 @@ struct xgene_mac_ops xgene_gmac_ops = {
 	.set_mac_addr = xgene_gmac_set_mac_addr,
 };
 
-struct xgene_port_ops xgene_gport_ops = {
+const struct xgene_port_ops xgene_gport_ops = {
 	.reset = xgene_enet_reset,
 	.cle_bypass = xgene_enet_cle_bypass,
 	.shutdown = xgene_gport_shutdown,
@@ -892,4 +903,5 @@ struct xgene_ring_ops xgene_ring1_ops = {
 	.clear = xgene_enet_clear_ring,
 	.wr_cmd = xgene_enet_wr_cmd,
 	.len = xgene_enet_ring_len,
+	.coalesce = xgene_enet_setup_coalescing,
 };

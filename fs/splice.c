@@ -185,6 +185,9 @@ ssize_t splice_to_pipe(struct pipe_inode_info *pipe,
 	unsigned int spd_pages = spd->nr_pages;
 	int ret, do_wakeup, page_nr;
 
+	if (!spd_pages)
+		return 0;
+
 	ret = 0;
 	do_wakeup = 0;
 	page_nr = 0;
@@ -415,6 +418,7 @@ __generic_file_splice_read(struct file *in, loff_t *ppos,
 			 */
 			if (!page->mapping) {
 				unlock_page(page);
+retry_lookup:
 				page = find_or_create_page(mapping, index,
 						mapping_gfp_mask(mapping));
 
@@ -439,13 +443,10 @@ __generic_file_splice_read(struct file *in, loff_t *ppos,
 			error = mapping->a_ops->readpage(in, page);
 			if (unlikely(error)) {
 				/*
-				 * We really should re-lookup the page here,
-				 * but it complicates things a lot. Instead
-				 * lets just do what we already stored, and
-				 * we'll get it the next time we are called.
+				 * Re-lookup the page
 				 */
 				if (error == AOP_TRUNCATED_PAGE)
-					error = 0;
+					goto retry_lookup;
 
 				break;
 			}
@@ -579,7 +580,7 @@ static ssize_t kernel_readv(struct file *file, const struct iovec *vec,
 	old_fs = get_fs();
 	set_fs(get_ds());
 	/* The cast to a user pointer is valid due to the set_fs() */
-	res = vfs_readv(file, (const struct iovec __user *)vec, vlen, &pos);
+	res = vfs_readv(file, (const struct iovec __user *)vec, vlen, &pos, 0);
 	set_fs(old_fs);
 
 	return res;
