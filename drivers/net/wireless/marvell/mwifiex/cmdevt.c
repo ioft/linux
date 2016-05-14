@@ -278,6 +278,10 @@ static int mwifiex_dnld_cmd_to_fw(struct mwifiex_private *priv,
 		spin_unlock_irqrestore(&adapter->mwifiex_cmd_lock, flags);
 
 		adapter->dbg.num_cmd_host_to_card_failure++;
+
+		if (adapter->if_ops.card_reset)
+			adapter->if_ops.card_reset(adapter);
+
 		return -1;
 	}
 
