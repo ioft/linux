@@ -2509,13 +2509,13 @@ static int igb_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 			dev_err(&pdev->dev, "NVM Read Error\n");
 	}
 
-	memcpy(netdev->dev_addr, hw->mac.addr, netdev->addr_len);
-
 	if (!is_valid_ether_addr(netdev->dev_addr)) {
 		dev_err(&pdev->dev, "Invalid MAC Address\n");
-		err = -EIO;
-		goto err_eeprom;
+		dev_err(&pdev->dev, "Using random MAC Address\n");
+		random_ether_addr(hw->mac.addr);
 	}
+
+	memcpy(netdev->dev_addr, hw->mac.addr, netdev->addr_len);
 
 	/* get firmware version for ethtool -i */
 	igb_set_fw_version(adapter);
