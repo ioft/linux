@@ -210,12 +210,6 @@ static int xhci_plat_probe(struct platform_device *pdev)
 			*priv = *priv_match;
 	}
 
-	if (xhci_plat_type_is(hcd, XHCI_PLAT_TYPE_MARVELL_ARMADA)) {
-		ret = xhci_mvebu_mbus_init_quirk(pdev);
-		if (ret)
-			goto disable_clk;
-	}
-
 	/* Get possile USB 2.0 type PHY (UTMI+) available with xhci */
 	hcd->phy = devm_phy_get(&pdev->dev, "usb2-phy");
 	if (IS_ERR(hcd->phy)) {
