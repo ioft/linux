@@ -103,6 +103,14 @@
 		gpio = <&gpio3 22 GPIO_ACTIVE_HIGH>;
 		enable-active-high;
 	};
+
+	sound-spdif {
+		compatible = "fsl,imx-audio-spdif";
+		model = "imx-spdif";
+		spdif-controller = <&spdif>;
+		spdif-out;
+		spdif-in;
+	};
 };
 
 &cpu0 {
@@ -197,7 +205,6 @@
 			MX6QDL_PAD_ENET_REF_CLK__ENET_TX_CLK	0x1b0b0
 			MX6QDL_PAD_ENET_MDIO__ENET_MDIO		0x1b0b0
 			MX6QDL_PAD_ENET_MDC__ENET_MDC		0x1b0b0
-			MX6QDL_PAD_GPIO_16__ENET_REF_CLK	0x4001b0a8
 		>;
 	};
 
@@ -227,6 +234,13 @@
 		fsl,pins = <
 			MX6QDL_PAD_GPIO_3__I2C3_SCL	0x4001b8b1
 			MX6QDL_PAD_GPIO_6__I2C3_SDA	0x4001b8b1
+		>;
+	};
+
+	pinctrl_spdif: spdifgrp {
+		fsl,pins = <
+			MX6QDL_PAD_GPIO_16__SPDIF_IN  0x1b0b0
+			MX6QDL_PAD_GPIO_19__SPDIF_OUT 0x1b0b0
 		>;
 	};
 
@@ -286,6 +300,12 @@
 };
 
 &snvs_poweroff {
+	status = "okay";
+};
+
+&spdif {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_spdif>;
 	status = "okay";
 };
 
