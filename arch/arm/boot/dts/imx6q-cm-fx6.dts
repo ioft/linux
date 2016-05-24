@@ -64,6 +64,20 @@
 		};
 	};
 
+	awnh387_pwrseq: awnh387_pwrseq {
+		compatible = "mmc-pwrseq-simple";
+		reset-gpios = <&gpio6 16 GPIO_ACTIVE_LOW>;
+	};
+
+	reg_awnh387_npoweron: regulator-awnh387-npoweron {
+		compatible = "regulator-fixed";
+		regulator-name = "regulator-awnh387-npoweron";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		gpio = <&gpio7 12 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+	};
+
 	reg_pcie_power_on_gpio: regulator-pcie-power-on-gpio {
 		compatible = "regulator-fixed";
 		regulator-name = "regulator-pcie-power-on-gpio";
@@ -330,6 +344,20 @@
 			MX6QDL_PAD_EIM_D22__GPIO3_IO22	0x130b0
 		>;
 	};
+
+	pinctrl_usdhc1: usdhc1grp {
+		fsl,pins = <
+			MX6QDL_PAD_SD1_CMD__SD1_CMD	0x17071
+			MX6QDL_PAD_SD1_CLK__SD1_CLK	0x10071
+			MX6QDL_PAD_SD1_DAT0__SD1_DATA0	0x17071
+			MX6QDL_PAD_SD1_DAT1__SD1_DATA1	0x17071
+			MX6QDL_PAD_SD1_DAT2__SD1_DATA2	0x17071
+			MX6QDL_PAD_SD1_DAT3__SD1_DATA3	0x17071
+			/* WIFI_PWR_RST */
+			MX6QDL_PAD_GPIO_17__GPIO7_IO12	0x1b0b0
+			MX6QDL_PAD_NANDF_CS3__GPIO6_IO16	0x1b0b0
+		>;
+	};
 };
 
 &pcie {
@@ -380,5 +408,14 @@
 	pinctrl-names = "default";
 	pinctrl-0 = <&pinctrl_usbotg>;
 	dr_mode = "otg";
+	status = "okay";
+};
+
+&usdhc1 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_usdhc1>;
+	mmc-pwrseq = <&awnh387_pwrseq>;
+	vmmc-supply = <&reg_awnh387_npoweron>;
+	non-removable;
 	status = "okay";
 };
