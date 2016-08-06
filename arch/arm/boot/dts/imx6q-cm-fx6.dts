@@ -63,6 +63,20 @@
 		};
 	};
 
+	awnh387_pwrseq: awnh387_pwrseq {
+		compatible = "mmc-pwrseq-simple";
+		reset-gpios = <&gpio6 16 GPIO_ACTIVE_LOW>;
+	};
+
+	reg_awnh387_npoweron: regulator-awnh387-npoweron {
+		compatible = "regulator-fixed";
+		regulator-name = "regulator-awnh387-npoweron";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		gpio = <&gpio7 12 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+	};
+
 	reg_pcie_power_on_gpio: regulator-pcie-power-on-gpio {
 		compatible = "regulator-fixed";
 		regulator-name = "regulator-pcie-power-on-gpio";
@@ -70,6 +84,72 @@
 		regulator-max-microvolt = <3300000>;
 		gpio = <&gpio2 24 GPIO_ACTIVE_HIGH>;
 		enable-active-high;
+	};
+
+	reg_sata_ldo_en: sata_ldo_en {
+		compatible = "regulator-fixed";
+		regulator-name = "cm_fx6_sata_ldo_en";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		gpio = <&gpio2 16 0>;
+		startup-delay-us = <100>;
+		enable-active-high;
+	};
+
+	reg_sata_phy_slp: sata_phy_slp {
+		compatible = "regulator-fixed";
+		regulator-name = "cm_fx6_sata_phy_slp";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		gpio = <&gpio3 23 0>;
+		startup-delay-us = <100>;
+		enable-active-high;
+		vin-supply = <&reg_sata_ldo_en>;
+	};
+
+	reg_sata_nrstdly: sata_nrstdly {
+		compatible = "regulator-fixed";
+		regulator-name = "cm_fx6_sata_nrstdly";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		gpio = <&gpio6 6 0>;
+		startup-delay-us = <100>;
+		enable-active-high;
+		vin-supply = <&reg_sata_phy_slp>;
+	};
+
+	reg_sata_pwren: sata_pwren {
+		compatible = "regulator-fixed";
+		regulator-name = "cm_fx6_sata_pwren";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		gpio = <&gpio1 28 0>;
+		startup-delay-us = <100>;
+		enable-active-high;
+		vin-supply = <&reg_sata_nrstdly>;
+	};
+
+	reg_sata_nstandby1: sata_nstandby1 {
+		compatible = "regulator-fixed";
+		regulator-name = "cm_fx6_sata_nstandby1";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		gpio = <&gpio3 20 0>;
+		startup-delay-us = <100>;
+		enable-active-high;
+		vin-supply = <&reg_sata_pwren>;
+	};
+
+	reg_sata_nstandby2: sata_nstandby2 {
+		compatible = "regulator-fixed";
+		regulator-name = "cm_fx6_sata_nstandby2";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		gpio = <&gpio5 2 0>;
+		startup-delay-us = <100>;
+		enable-active-high;
+		regulator-boot-on;
+		vin-supply = <&reg_sata_nstandby1>;
 	};
 
 	reg_usb_h1_vbus: usb_h1_vbus {
@@ -88,6 +168,14 @@
 		regulator-max-microvolt = <5000000>;
 		gpio = <&gpio3 22 GPIO_ACTIVE_HIGH>;
 		enable-active-high;
+	};
+
+	sound-spdif {
+		compatible = "fsl,imx-audio-spdif";
+		model = "imx-spdif";
+		spdif-controller = <&spdif>;
+		spdif-out;
+		spdif-in;
 	};
 };
 
@@ -156,6 +244,24 @@
 };
 
 &iomuxc {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_hog>;
+
+	pinctrl_hog: hoggrp {
+		fsl,pins = <
+			/* SATA PWR */
+			MX6QDL_PAD_ENET_TX_EN__GPIO1_IO28 0x80000000
+			MX6QDL_PAD_EIM_A22__GPIO2_IO16 0x80000000
+			MX6QDL_PAD_EIM_D20__GPIO3_IO20 0x80000000
+			MX6QDL_PAD_EIM_A25__GPIO5_IO02 0x80000000
+			/* SATA CTRL */
+			MX6QDL_PAD_ENET_TXD0__GPIO1_IO30 0x80000000
+			MX6QDL_PAD_EIM_D29__GPIO3_IO29 0x80000000
+			MX6QDL_PAD_EIM_A23__GPIO6_IO06 0x80000000
+			MX6QDL_PAD_EIM_D23__GPIO3_IO23 0x80000000
+		>;
+	};
+
 	pinctrl_ecspi1: ecspi1grp {
 		fsl,pins = <
 			MX6QDL_PAD_EIM_D16__ECSPI1_SCLK	0x100b1
@@ -183,7 +289,6 @@
 			MX6QDL_PAD_ENET_REF_CLK__ENET_TX_CLK	0x1b0b0
 			MX6QDL_PAD_ENET_MDIO__ENET_MDIO		0x1b0b0
 			MX6QDL_PAD_ENET_MDC__ENET_MDC		0x1b0b0
-			MX6QDL_PAD_GPIO_16__ENET_REF_CLK	0x4001b0a8
 		>;
 	};
 
@@ -216,6 +321,13 @@
 		>;
 	};
 
+	pinctrl_spdif: spdifgrp {
+		fsl,pins = <
+			MX6QDL_PAD_GPIO_16__SPDIF_IN  0x1b0b0
+			MX6QDL_PAD_GPIO_19__SPDIF_OUT 0x1b0b0
+		>;
+	};
+
 	pinctrl_pcie: pciegrp {
 		fsl,pins = <
 			MX6QDL_PAD_ENET_RXD1__GPIO1_IO26	0x1b0b1
@@ -242,6 +354,21 @@
 			MX6QDL_PAD_EIM_D22__GPIO3_IO22	0x130b0
 		>;
 	};
+
+	pinctrl_usdhc1: usdhc1grp {
+		fsl,pins = <
+			MX6QDL_PAD_SD1_CMD__SD1_CMD    0x17071
+			MX6QDL_PAD_SD1_CLK__SD1_CLK    0x10071
+			MX6QDL_PAD_SD1_DAT0__SD1_DATA0 0x17071
+			MX6QDL_PAD_SD1_DAT1__SD1_DATA1 0x17071
+			MX6QDL_PAD_SD1_DAT2__SD1_DATA2 0x17071
+			MX6QDL_PAD_SD1_DAT3__SD1_DATA3 0x17071
+			/* WIFI_PWR_RST */
+			/* FIXME: replace 0x80000000 by proper values */
+			MX6QDL_PAD_GPIO_17__GPIO7_IO12  0x80000000
+			MX6QDL_PAD_NANDF_CS3__GPIO6_IO16 0x80000000
+		>;
+	};
 };
 
 &pcie {
@@ -257,6 +384,12 @@
 };
 
 &snvs_poweroff {
+	status = "okay";
+};
+
+&spdif {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_spdif>;
 	status = "okay";
 };
 
@@ -278,5 +411,14 @@
 	pinctrl-names = "default";
 	pinctrl-0 = <&pinctrl_usbotg>;
 	dr_mode = "otg";
+	status = "okay";
+};
+
+&usdhc1 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_usdhc1>;
+	non-removable;
+	mmc-pwrseq = <&awnh387_pwrseq>;
+	vmmc-supply = <&reg_awnh387_npoweron>;
 	status = "okay";
 };
