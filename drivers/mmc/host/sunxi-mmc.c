@@ -681,14 +681,12 @@ static int sunxi_mmc_oclk_onoff(struct sunxi_mmc_host *host, u32 oclk_en)
 	return 0;
 }
 
-static int sunxi_mmc_calibrate(struct sunxi_mmc_host *host, int reg_off)
+static int sunxi_mmc_calibrate(struct sunxi_mmc_host *host, int reg_off,
+			       int degrees)
 {
 	u32 reg = readl(host->reg_base + reg_off);
 	u32 delay;
 	unsigned long timeout;
-
-	if (!host->cfg->can_calibrate)
-		return 0;
 
 	reg &= ~(SDXC_CAL_DL_MASK << SDXC_CAL_DL_SW_SHIFT);
 	reg &= ~SDXC_CAL_DL_SW_EN;
@@ -711,6 +709,7 @@ static int sunxi_mmc_calibrate(struct sunxi_mmc_host *host, int reg_off)
 	}
 
 	delay = (reg >> SDXC_CAL_DL_SHIFT) & SDXC_CAL_DL_MASK;
+	delay = degrees * delay / 360;
 
 	reg &= ~SDXC_CAL_START;
 	reg |= (delay << SDXC_CAL_DL_SW_SHIFT) | SDXC_CAL_DL_SW_EN;
@@ -747,6 +746,11 @@ static int sunxi_mmc_clk_set_phase(struct sunxi_mmc_host *host,
 	} else {
 		return -EINVAL;
 	}
+
+	if (host->cfg->can_calibrate)
+		return sunxi_mmc_calibrate(host, SDXC_REG_SAMP_DL_REG,
+					   host->cfg->clk_delays[index].sample);
+	/* TODO: calibrate data strobe delay once HS-400 is supported. */
 
 	clk_set_phase(host->clk_sample, host->cfg->clk_delays[index].sample);
 	clk_set_phase(host->clk_output, host->cfg->clk_delays[index].output);
@@ -801,12 +805,6 @@ static int sunxi_mmc_clk_set_rate(struct sunxi_mmc_host *host,
 	ret = sunxi_mmc_clk_set_phase(host, ios, rate);
 	if (ret)
 		return ret;
-
-	ret = sunxi_mmc_calibrate(host, SDXC_REG_SAMP_DL_REG);
-	if (ret)
-		return ret;
-
-	/* TODO: enable calibrate on sdc2 SDXC_REG_DS_DL_REG of A64 */
 
 	return sunxi_mmc_oclk_onoff(host, 1);
 }
@@ -1056,6 +1054,14 @@ static const struct sunxi_mmc_clk_delay sun9i_mmc_clk_delays[] = {
 	[SDXC_CLK_50M_DDR_8BIT]	= { .output =  72, .sample =  72 },
 };
 
+static const struct sunxi_mmc_clk_delay sun50i_mmc_clk_delays[] = {
+	[SDXC_CLK_400K]		= { .output = 90, .sample = 0 },
+	[SDXC_CLK_25M]		= { .output = 90, .sample = 0 },
+	[SDXC_CLK_50M]		= { .output = 90, .sample = 0 },
+	[SDXC_CLK_50M_DDR]	= { .output = 90, .sample = 0 },
+	[SDXC_CLK_50M_DDR_8BIT]	= { .output = 90, .sample = 0 },
+};
+
 static const struct sunxi_mmc_cfg sun4i_a10_cfg = {
 	.idma_des_size_bits = 13,
 	.clk_delays = NULL,
@@ -1082,7 +1088,7 @@ static const struct sunxi_mmc_cfg sun9i_a80_cfg = {
 
 static const struct sunxi_mmc_cfg sun50i_a64_cfg = {
 	.idma_des_size_bits = 16,
-	.clk_delays = NULL,
+	.clk_delays = sun50i_mmc_clk_delays,
 	.can_calibrate = true,
 };
 
@@ -1129,7 +1135,7 @@ static int sunxi_mmc_resource_request(struct sunxi_mmc_host *host,
 		return PTR_ERR(host->clk_mmc);
 	}
 
-	if (host->cfg->clk_delays) {
+	if (host->cfg->clk_delays && !host->cfg->can_calibrate) {
 		host->clk_output = devm_clk_get(&pdev->dev, "output");
 		if (IS_ERR(host->clk_output)) {
 			dev_err(&pdev->dev, "Could not get output clock\n");
