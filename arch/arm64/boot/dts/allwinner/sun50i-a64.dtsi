@@ -153,6 +153,16 @@
 				function = "uart0";
 			};
 
+			uart1_pins: uart1@0 {
+				pins = "PG6", "PG7";
+				function = "uart1";
+			};
+
+			uart1_pins_4: uart1_4@0 {
+				pins = "PG6", "PG7", "PG8", "PG9";
+				function = "uart1";
+			};
+
 			mmc0_pins: mmc0@0 {
 				pins = "PF0", "PF1", "PF2", "PF3", "PF4", "PF5";
 				function = "mmc0";
