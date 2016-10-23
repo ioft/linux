@@ -90,3 +90,20 @@
 	bus-width = <4>;
 	status = "okay";
 };
+
+&usbphy {
+	status = "okay";
+};
+
+&ehci1 {
+	status = "okay";
+};
+
+&ohci1 {
+	status = "okay";
+};
+
+&usb_otg {
+	dr_mode = "host";
+	status = "okay";
+};
