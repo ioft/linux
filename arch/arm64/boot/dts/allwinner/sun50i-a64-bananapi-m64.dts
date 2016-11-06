@@ -108,6 +108,13 @@
 	status = "okay";
 };
 
+&mmc2_pins {
+	/* Increase drive strength for DDR modes */
+	allwinner,drive = <SUN4I_PINCTRL_40_MA>;
+	/* eMMC is missing pull-ups */
+	allwinner,pull = <SUN4I_PINCTRL_PULL_UP>;
+};
+
 &mdio {
 	ext_phy: ethernet-phy@1 {
 		reg = <0>;
