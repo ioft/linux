@@ -123,3 +123,19 @@
 	/* eMMC is missing pull-ups */
 	bias-pull-up;
 };
+
+&usbphy {
+	status = "okay";
+};
+
+&ehci1 {
+	status = "okay";
+};
+
+&ohci1 {
+	status = "okay";
+};
+
+&usb_otg {
+	status = "okay";
+};
