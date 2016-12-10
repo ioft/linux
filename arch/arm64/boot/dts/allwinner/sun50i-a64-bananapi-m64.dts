@@ -51,6 +51,7 @@
 	aliases {
 		serial0 = &uart0;
 		serial1 = &uart1;
+		ethernet0 = &emac;
 	};
 
 	chosen {
@@ -137,5 +138,21 @@
 };
 
 &usb_otg {
+	status = "okay";
+};
+
+&mdio {
+	ext_phy: ethernet-phy@1 {
+		reg = <0>;
+	};
+};
+
+&emac {
+	pinctrl-names = "default";
+	pinctrl-0 = <&emac_rgmii_pins>;
+	phy-handle = <&ext_phy>;
+	phy-mode = "rgmii";
+
+	allwinner,leds-active-low;
 	status = "okay";
 };
