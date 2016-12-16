@@ -108,5 +108,6 @@ config SUN8I_H3_CCU
 	select SUNXI_CCU_MP
 	select SUNXI_CCU_PHASE
 	default MACH_SUN8I
+	default ARM64 && ARCH_SUNXI
 
 endif
