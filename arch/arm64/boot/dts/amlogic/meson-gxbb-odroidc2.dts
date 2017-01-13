@@ -61,7 +61,7 @@
 
 	memory@0 {
 		device_type = "memory";
-		reg = <0x0 0x0 0x0 0x80000000>;
+		linux,usable-memory = <0x0 0x01000000 0x0 0x7f000000>;
 	};
 
 	usb_otg_pwr: regulator-usb-pwrs {
@@ -177,6 +177,22 @@
 &usb1 {
 	status = "okay";
 };
+
+&ethmac {
+       phy-handle = <&eth_phy0>;
+
+       mdio {
+               compatible = "snps,dwmac-mdio";
+               #address-cells = <1>;
+               #size-cells = <0>;
+
+               eth_phy0: ethernet-phy@0 {
+                       reg = <0>;
+                       realtek,disable-eee-1000t;
+               };
+       };
+};
+
 
 /* SD */
 &sd_emmc_b {
