@@ -52,6 +52,11 @@
 	#address-cells = <1>;
 	#size-cells = <1>;
 
+        aliases {
+               spi0 = &spi0;
+               spi1 = &spi1;
+        };
+
 	cpus {
 		#address-cells = <1>;
 		#size-cells = <0>;
@@ -172,6 +177,7 @@
 				pins = "PF0", "PF1", "PF2", "PF3", "PF4", "PF5";
 				function = "mmc0";
 				drive-strength = <30>;
+				bias-pull-up;
 			};
 
 			mmc0_default_cd_pin: mmc0_cd_pin@0 {
@@ -192,6 +198,7 @@
 				       "PC15", "PC16";
 				function = "mmc2";
 				drive-strength = <30>;
+				bias-pull-up;
 			};
 
 			emac_rmii_pins: emac0@0 {
@@ -207,6 +214,35 @@
 				function = "emac";
 				drive-strength = <40>;
 			};
+
+			spi0_pins_a: spi0@0 {
+				allwinner,pins = "PC0", "PC1", "PC2";
+				allwinner,function = "spi0";
+				allwinner,drive = <SUN4I_PINCTRL_10_MA>;
+				allwinner,pull = <SUN4I_PINCTRL_NO_PULL>;
+			};
+
+			spi0_cs0_pins_a: spi0_cs0@0 {
+				allwinner,pins = "PC3";
+				allwinner,function = "spi0";
+				allwinner,drive = <SUN4I_PINCTRL_10_MA>;
+				allwinner,pull = <SUN4I_PINCTRL_NO_PULL>;
+			};
+
+			spi1_pins_a: spi1@0 {
+				allwinner,pins = "PD1", "PD2", "PD3";
+				allwinner,function = "spi1";
+				allwinner,drive = <SUN4I_PINCTRL_10_MA>;
+				allwinner,pull = <SUN4I_PINCTRL_NO_PULL>;
+			};
+
+			spi1_cs0_pins_a: spi1_cs0@0 {
+				allwinner,pins = "PD0";
+				allwinner,function = "spi1";
+				allwinner,drive = <SUN4I_PINCTRL_10_MA>;
+				allwinner,pull = <SUN4I_PINCTRL_NO_PULL>;
+			};
+
 		};
 
 		uart0: serial@1c28000 {
@@ -347,6 +383,36 @@
 			interrupts = <GIC_PPI 9 (GIC_CPU_MASK_SIMPLE(4) | IRQ_TYPE_LEVEL_HIGH)>;
 			interrupt-controller;
 			#interrupt-cells = <3>;
+		};
+
+		spi0: spi@01c68000 {
+			compatible = "allwinner,sun6i-a31-spi";
+			reg = <0x01c68000 0x1000>;
+			interrupts = <GIC_SPI 65 IRQ_TYPE_LEVEL_HIGH>;
+			pinctrl-names = "default", "sleep";
+			pinctrl-0 = <&spi0_pins_a>, <&spi0_cs0_pins_a>;
+			clocks = <&ccu CLK_BUS_SPI0>, <&ccu CLK_SPI0>;
+			clock-names = "ahb", "mod";
+			clock-frequency = <0x5f5e100>;
+			resets = <&ccu RST_BUS_SPI0>;
+			status = "disabled";
+			#address-cells = <1>;
+			#size-cells = <0>;
+		};
+
+		spi1: spi@01c69000 {
+			compatible = "allwinner,sun6i-a31-spi";
+			reg = <0x01c69000 0x1000>;
+			interrupts = <GIC_SPI 66 IRQ_TYPE_LEVEL_HIGH>;
+			pinctrl-names = "default", "sleep";
+			pinctrl-0 = <&spi1_pins_a>, <&spi1_cs0_pins_a>;
+			clocks = <&ccu CLK_BUS_SPI1>, <&ccu CLK_SPI1>;
+			clock-names = "ahb", "mod";
+			clock-frequency = <0x5f5e100>;
+			resets = <&ccu RST_BUS_SPI1>;
+			status = "disabled";
+			#address-cells = <1>;
+			#size-cells = <0>;
 		};
 
 		usbphy: phy@01c19400 {
