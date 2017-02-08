@@ -68,7 +68,7 @@ static u64 time_to_jiffies(u64 sec, u32 nsec)
 	if (sec || nsec) {
 		struct timespec64 ts = {
 			sec,
-			max_t(u32, nsec, NSEC_PER_SEC - 1)
+			min_t(u32, nsec, NSEC_PER_SEC - 1)
 		};
 
 		return get_jiffies_64() + timespec64_to_jiffies(&ts);
@@ -1191,7 +1191,7 @@ static int fuse_direntplus_link(struct file *file,
 	struct inode *dir = d_inode(parent);
 	struct fuse_conn *fc;
 	struct inode *inode;
-	DECLARE_WAIT_QUEUE_HEAD_ONSTACK(wq);
+	DECLARE_SWAIT_QUEUE_HEAD_ONSTACK(wq);
 
 	if (!o->nodeid) {
 		/*

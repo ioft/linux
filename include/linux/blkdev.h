@@ -89,6 +89,7 @@ struct request {
 	struct list_head queuelist;
 	union {
 		struct call_single_data csd;
+		struct work_struct work;
 		u64 fifo_time;
 	};
 
@@ -467,7 +468,7 @@ struct request_queue {
 	struct throtl_data *td;
 #endif
 	struct rcu_head		rcu_head;
-	wait_queue_head_t	mq_freeze_wq;
+	struct swait_queue_head	mq_freeze_wq;
 	struct percpu_ref	q_usage_counter;
 	struct list_head	all_q_node;
 
@@ -1057,7 +1058,7 @@ static inline int blk_pre_runtime_suspend(struct request_queue *q)
 static inline void blk_post_runtime_suspend(struct request_queue *q, int err) {}
 static inline void blk_pre_runtime_resume(struct request_queue *q) {}
 static inline void blk_post_runtime_resume(struct request_queue *q, int err) {}
-extern inline void blk_set_runtime_active(struct request_queue *q) {}
+static inline void blk_set_runtime_active(struct request_queue *q) {}
 #endif
 
 /*

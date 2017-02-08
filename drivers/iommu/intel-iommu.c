@@ -479,7 +479,7 @@ struct deferred_flush_data {
 	struct deferred_flush_table *tables;
 };
 
-DEFINE_PER_CPU(struct deferred_flush_data, deferred_flush);
+static DEFINE_PER_CPU(struct deferred_flush_data, deferred_flush);
 
 /* bitmap for indexing intel_iommus */
 static int g_num_of_iommus;
@@ -2036,6 +2036,25 @@ static int domain_context_mapping_one(struct dmar_domain *domain,
 	ret = 0;
 	if (context_present(context))
 		goto out_unlock;
+
+	/*
+	 * For kdump cases, old valid entries may be cached due to the
+	 * in-flight DMA and copied pgtable, but there is no unmapping
+	 * behaviour for them, thus we need an explicit cache flush for
+	 * the newly-mapped device. For kdump, at this point, the device
+	 * is supposed to finish reset at its driver probe stage, so no
+	 * in-flight DMA will exist, and we don't need to worry anymore
+	 * hereafter.
+	 */
+	if (context_copied(context)) {
+		u16 did_old = context_domain_id(context);
+
+		if (did_old >= 0 && did_old < cap_ndoms(iommu->cap))
+			iommu->flush.flush_context(iommu, did_old,
+						   (((u16)bus) << 8) | devfn,
+						   DMA_CCMD_MASK_NOBIT,
+						   DMA_CCMD_DEVICE_INVL);
+	}
 
 	pgd = domain->pgd;
 
@@ -3696,10 +3715,8 @@ static void add_unmap(struct dmar_domain *dom, unsigned long iova_pfn,
 	struct intel_iommu *iommu;
 	struct deferred_flush_entry *entry;
 	struct deferred_flush_data *flush_data;
-	unsigned int cpuid;
 
-	cpuid = get_cpu();
-	flush_data = per_cpu_ptr(&deferred_flush, cpuid);
+	flush_data = raw_cpu_ptr(&deferred_flush);
 
 	/* Flush all CPUs' entries to avoid deferring too much.  If
 	 * this becomes a bottleneck, can just flush us, and rely on
@@ -3732,8 +3749,6 @@ static void add_unmap(struct dmar_domain *dom, unsigned long iova_pfn,
 	}
 	flush_data->size++;
 	spin_unlock_irqrestore(&flush_data->lock, flags);
-
-	put_cpu();
 }
 
 static void intel_unmap(struct device *dev, dma_addr_t dev_addr, size_t size)
@@ -5197,6 +5212,25 @@ static void intel_iommu_remove_device(struct device *dev)
 }
 
 #ifdef CONFIG_INTEL_IOMMU_SVM
+#define MAX_NR_PASID_BITS (20)
+static inline unsigned long intel_iommu_get_pts(struct intel_iommu *iommu)
+{
+	/*
+	 * Convert ecap_pss to extend context entry pts encoding, also
+	 * respect the soft pasid_max value set by the iommu.
+	 * - number of PASID bits = ecap_pss + 1
+	 * - number of PASID table entries = 2^(pts + 5)
+	 * Therefore, pts = ecap_pss - 4
+	 * e.g. KBL ecap_pss = 0x13, PASID has 20 bits, pts = 15
+	 */
+	if (ecap_pss(iommu->ecap) < 5)
+		return 0;
+
+	/* pasid_max is encoded as actual number of entries not the bits */
+	return find_first_bit((unsigned long *)&iommu->pasid_max,
+			MAX_NR_PASID_BITS) - 5;
+}
+
 int intel_iommu_enable_pasid(struct intel_iommu *iommu, struct intel_svm_dev *sdev)
 {
 	struct device_domain_info *info;
@@ -5229,7 +5263,9 @@ int intel_iommu_enable_pasid(struct intel_iommu *iommu, struct intel_svm_dev *sd
 
 	if (!(ctx_lo & CONTEXT_PASIDE)) {
 		context[1].hi = (u64)virt_to_phys(iommu->pasid_state_table);
-		context[1].lo = (u64)virt_to_phys(iommu->pasid_table) | ecap_pss(iommu->ecap);
+		context[1].lo = (u64)virt_to_phys(iommu->pasid_table) |
+			intel_iommu_get_pts(iommu);
+
 		wmb();
 		/* CONTEXT_TT_MULTI_LEVEL and CONTEXT_TT_DEV_IOTLB are both
 		 * extended to permit requests-with-PASID if the PASIDE bit

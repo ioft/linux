@@ -575,8 +575,11 @@ void ipoib_mcast_join_task(struct work_struct *work)
 	if (!test_bit(IPOIB_FLAG_OPER_UP, &priv->flags))
 		return;
 
-	if (ib_query_port(priv->ca, priv->port, &port_attr) ||
-	    port_attr.state != IB_PORT_ACTIVE) {
+	if (ib_query_port(priv->ca, priv->port, &port_attr)) {
+		ipoib_dbg(priv, "ib_query_port() failed\n");
+		return;
+	}
+	if (port_attr.state != IB_PORT_ACTIVE) {
 		ipoib_dbg(priv, "port state is not ACTIVE (state = %d) suspending join task\n",
 			  port_attr.state);
 		return;
@@ -899,7 +902,7 @@ void ipoib_mcast_restart_task(struct work_struct *work)
 
 	ipoib_dbg_mcast(priv, "restarting multicast task\n");
 
-	local_irq_save(flags);
+	local_irq_save_nort(flags);
 	netif_addr_lock(dev);
 	spin_lock(&priv->lock);
 
@@ -981,7 +984,7 @@ void ipoib_mcast_restart_task(struct work_struct *work)
 
 	spin_unlock(&priv->lock);
 	netif_addr_unlock(dev);
-	local_irq_restore(flags);
+	local_irq_restore_nort(flags);
 
 	/*
 	 * make sure the in-flight joins have finished before we attempt

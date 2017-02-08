@@ -41,6 +41,7 @@
  * We store the saved ksp_limit in the unused part
  * of the STACK_FRAME_OVERHEAD
  */
+#ifndef CONFIG_PREEMPT_RT_FULL
 _GLOBAL(call_do_softirq)
 	mflr	r0
 	stw	r0,4(r1)
@@ -57,6 +58,7 @@ _GLOBAL(call_do_softirq)
 	stw	r10,THREAD+KSP_LIMIT(r2)
 	mtlr	r0
 	blr
+#endif
 
 /*
  * void call_do_irq(struct pt_regs *regs, struct thread_info *irqtp);
@@ -296,7 +298,7 @@ _GLOBAL(flush_instruction_cache)
 	lis	r3, KERNELBASE@h
 	iccci	0,r3
 #endif
-#elif CONFIG_FSL_BOOKE
+#elif defined(CONFIG_FSL_BOOKE)
 BEGIN_FTR_SECTION
 	mfspr   r3,SPRN_L1CSR0
 	ori     r3,r3,L1CSR0_CFI|L1CSR0_CLFC
