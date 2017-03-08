@@ -15,6 +15,12 @@
  */
 #include <linux/phy.h>
 #include <linux/module.h>
+#include <linux/of.h>
+
+struct rtl8211f_phy_priv {
+	bool eee_1000_disable;
+	bool eee_100_disable;
+};
 
 #define RTL821x_PHYSR		0x11
 #define RTL821x_PHYSR_DUPLEX	0x2000
@@ -93,6 +99,25 @@ static int rtl8211f_config_intr(struct phy_device *phydev)
 	return err;
 }
 
+static void rtl8211f_force_eee(struct phy_device *phydev)
+{
+	struct rtl8211f_phy_priv *priv = phydev->priv;
+	u16 val;
+
+	if (priv->eee_1000_disable || priv->eee_100_disable) {
+		val = phy_read_mmd_indirect(phydev, MDIO_AN_EEE_ADV,
+					    MDIO_MMD_AN);
+
+		if (priv->eee_1000_disable)
+			val &= ~MDIO_AN_EEE_ADV_1000T;
+		if (priv->eee_100_disable)
+			val &= ~MDIO_AN_EEE_ADV_100TX;
+
+		phy_write_mmd_indirect(phydev, MDIO_AN_EEE_ADV,
+				       MDIO_MMD_AN, val);
+	}
+}
+
 static int rtl8211f_config_init(struct phy_device *phydev)
 {
 	int ret;
@@ -101,6 +126,8 @@ static int rtl8211f_config_init(struct phy_device *phydev)
 	ret = genphy_config_init(phydev);
 	if (ret < 0)
 		return ret;
+
+	rtl8211f_force_eee(phydev);
 
 	phy_write(phydev, RTL8211F_PAGE_SELECT, 0xd08);
 	reg = phy_read(phydev, 0x11);
@@ -115,6 +142,26 @@ static int rtl8211f_config_init(struct phy_device *phydev)
 	phy_write(phydev, 0x11, reg);
 	/* restore to default page 0 */
 	phy_write(phydev, RTL8211F_PAGE_SELECT, 0x0);
+
+	return 0;
+}
+
+static int rtl8211f_phy_probe(struct phy_device *phydev)
+{
+	struct device *dev = &phydev->mdio.dev;
+	struct device_node *of_node = dev->of_node;
+	struct rtl8211f_phy_priv *priv;
+
+	priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
+	if (!priv)
+		return -ENOMEM;
+
+	if (of_property_read_bool(of_node, "realtek,disable-eee-1000t"))
+		priv->eee_1000_disable= true;
+	if (of_property_read_bool(of_node, "realtek,disable-eee-100t"))
+		priv->eee_100_disable= true;
+
+	phydev->priv = priv;
 
 	return 0;
 }
@@ -168,6 +215,7 @@ static struct phy_driver realtek_drvs[] = {
 		.phy_id_mask	= 0x001fffff,
 		.features	= PHY_GBIT_FEATURES,
 		.flags		= PHY_HAS_INTERRUPT,
+		.probe		= &rtl8211f_phy_probe,
 		.config_aneg	= &genphy_config_aneg,
 		.config_init	= &rtl8211f_config_init,
 		.read_status	= &genphy_read_status,

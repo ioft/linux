@@ -61,10 +61,23 @@
 
 	memory@0 {
 		device_type = "memory";
-		reg = <0x0 0x0 0x0 0x80000000>;
+		linux,usable-memory = <0x0 0x01000000 0x0 0x7f000000>;
 	};
 
-	usb_otg_pwr: regulator-usb-pwrs {
+	usb_host_pwr: regulator-usb-host-pwrs {
+		compatible = "regulator-fixed";
+
+		regulator-name = "USB_HOST_PWR";
+
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+
+		gpio = <&gpio_ao GPIOAO_4 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+	};
+
+
+	usb_otg_pwr: regulator-usb-otg-pwrs {
 		compatible = "regulator-fixed";
 
 		regulator-name = "USB_OTG_PWR";
@@ -137,10 +150,6 @@
 	};
 };
 
-&scpi_clocks {
-	status = "disabled";
-};
-
 &uart_AO {
 	status = "okay";
 	pinctrl-0 = <&uart_ao_a_pins>;
@@ -184,6 +193,7 @@
 
 &usb1_phy {
 	status = "okay";
+	phy-supply = <&usb_host_pwr>;
 };
 
 &usb0 {
@@ -193,6 +203,22 @@
 &usb1 {
 	status = "okay";
 };
+
+&ethmac {
+       phy-handle = <&eth_phy0>;
+
+       mdio {
+               compatible = "snps,dwmac-mdio";
+               #address-cells = <1>;
+               #size-cells = <0>;
+
+               eth_phy0: ethernet-phy@0 {
+                       reg = <0>;
+                       realtek,disable-eee-1000t;
+               };
+       };
+};
+
 
 /* SD */
 &sd_emmc_b {
