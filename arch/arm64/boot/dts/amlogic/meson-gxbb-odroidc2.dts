@@ -272,6 +272,22 @@
 	vref-supply = <&vcc1v8>;
 };
 
+&ethmac {
+       phy-handle = <&eth_phy0>;
+
+       mdio {
+               compatible = "snps,dwmac-mdio";
+               #address-cells = <1>;
+               #size-cells = <0>;
+
+               eth_phy0: ethernet-phy@0 {
+                       reg = <0>;
+                       realtek,disable-eee-1000t;
+               };
+       };
+};
+
+
 /* SD */
 &sd_emmc_b {
 	status = "okay";
