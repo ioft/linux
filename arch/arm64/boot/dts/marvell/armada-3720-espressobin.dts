@@ -125,8 +125,7 @@
 &spi0 {
 	status = "okay";
 
-	/* W25Q32DW */
-	spi-flash@0 {
+	w25q32dw@0 {
 		#address-cells = <1>;
 		#size-cells = <1>;
 		compatible = "jedec,spi-nor";
@@ -136,28 +135,6 @@
 
 		pinctrl-names = "default";
 		pinctrl-0 = <&spi_quad_pins>;
-
-		partitions {
-			compatible = "fixed-partitions";
-			#address-cells = <1>;
-			#size-cells = <1>;
-
-			/*
-			 * TODO: this is mostly guesswork
-			 */
-			partition@0 {
-				label = "bootloaders";
-				reg = <0 0x180000>;
-			};
-			partition@180000 {
-				label = "u-boot env";
-				reg = <0x180000 0x10000>;
-			};
-			partition@200000 {
-				label = "leftovers";
-				reg = <0x200000 0x200000>;
-			};
-		};
 	};
 };
 
