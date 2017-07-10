@@ -86,6 +86,21 @@
 	status = "okay";
 };
 
+/* SD card */
+&sdhci1 {
+	status = "okay";
+
+	wp-inverted;
+	bus-width = <4>;
+	broken-cd;
+	no-1-8-v;
+
+	marvell,pad-type = "sd";
+
+	pinctrl-names = "default";
+	pinctrl-0 = <&sdio0_pins>;
+};
+
 &spi0 {
 	status = "okay";
 
