@@ -45,6 +45,7 @@
 
 /dts-v1/;
 
+#include <dt-bindings/gpio/gpio.h>
 #include "armada-372x.dtsi"
 
 / {
@@ -76,8 +77,23 @@
 	status = "okay";
 };
 
+/* microsd slot */
+&sdhci1 {
+	wp-inverted;
+	bus-width = <4>;
+	cd-gpios = <&gpionb 3 GPIO_ACTIVE_LOW>;
+	no-1-8-v;
+	marvell,pad-type = "sd";
+	status = "okay";
+};
+
 /* J7 */
 &usb3 {
+	status = "okay";
+};
+
+/* J8 */
+&usb2 {
 	status = "okay";
 };
 
