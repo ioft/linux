@@ -128,6 +128,11 @@
 	pinctrl-names = "default";
 };
 
+
+&usb0 {
+	status = "okay";
+};
+
 &ir {
 	status = "okay";
 	pinctrl-0 = <&remote_input_ao_pins>;
