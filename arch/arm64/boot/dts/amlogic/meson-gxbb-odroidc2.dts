@@ -243,10 +243,6 @@
 	vref-supply = <&vcc1v8>;
 };
 
-&scpi_clocks {
-	status = "disabled";
-};
-
 /* SD */
 &sd_emmc_b {
 	status = "okay";
