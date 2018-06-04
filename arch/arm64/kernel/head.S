@@ -50,8 +50,8 @@
 #error TEXT_OFFSET must be at least 4KB aligned
 #elif (PAGE_OFFSET & 0x1fffff) != 0
 #error PAGE_OFFSET must be at least 2MB aligned
-#elif TEXT_OFFSET > 0x1fffff
-#error TEXT_OFFSET must be less than 2MB
+// #elif TEXT_OFFSET > 0x1fffff
+// #error TEXT_OFFSET must be less than 2MB
 #endif
 
 /*
