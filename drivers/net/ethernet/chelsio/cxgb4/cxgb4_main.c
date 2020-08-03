@@ -66,6 +66,9 @@
 #include <linux/crash_dump.h>
 #include <net/udp_tunnel.h>
 #include <net/xfrm.h>
+#if defined(CONFIG_CHELSIO_TLS_DEVICE)
+#include <net/tls.h>
+#endif
 
 #include "cxgb4.h"
 #include "cxgb4_filter.h"
@@ -90,11 +93,6 @@
 
 char cxgb4_driver_name[] = KBUILD_MODNAME;
 
-#ifdef DRV_VERSION
-#undef DRV_VERSION
-#endif
-#define DRV_VERSION "2.0.0-ko"
-const char cxgb4_driver_version[] = DRV_VERSION;
 #define DRV_DESC "Chelsio T4/T5/T6 Network Driver"
 
 #define DFLT_MSG_ENABLE (NETIF_MSG_DRV | NETIF_MSG_PROBE | NETIF_MSG_LINK | \
@@ -137,7 +135,6 @@ const char cxgb4_driver_version[] = DRV_VERSION;
 MODULE_DESCRIPTION(DRV_DESC);
 MODULE_AUTHOR("Chelsio Communications");
 MODULE_LICENSE("Dual BSD/GPL");
-MODULE_VERSION(DRV_VERSION);
 MODULE_DEVICE_TABLE(pci, cxgb4_pci_tbl);
 MODULE_FIRMWARE(FW4_FNAME);
 MODULE_FIRMWARE(FW5_FNAME);
@@ -186,6 +183,7 @@ static struct dentry *cxgb4_debugfs_root;
 
 LIST_HEAD(adapter_list);
 DEFINE_MUTEX(uld_mutex);
+LIST_HEAD(uld_list);
 
 static int cfg_queues(struct adapter *adap);
 
@@ -451,7 +449,7 @@ static int set_rxmode(struct net_device *dev, int mtu, bool sleep_ok)
  *		   or -1
  *	@addr: the new MAC address value
  *	@persist: whether a new MAC allocation should be persistent
- *	@add_smt: if true also add the address to the HW SMT
+ *	@smt_idx: the destination to store the new SMT index.
  *
  *	Modifies an MPS filter and sets it to the new MAC address if
  *	@tcam_idx >= 0, or adds the MAC address to a new filter if
@@ -802,6 +800,26 @@ static int setup_ppod_edram(struct adapter *adap)
 		return -1;
 	}
 	return 0;
+}
+
+static void adap_config_hpfilter(struct adapter *adapter)
+{
+	u32 param, val = 0;
+	int ret;
+
+	/* Enable HP filter region. Older fw will fail this request and
+	 * it is fine.
+	 */
+	param = FW_PARAM_DEV(HPFILTER_REGION_SUPPORT);
+	ret = t4_set_params(adapter, adapter->mbox, adapter->pf, 0,
+			    1, &param, &val);
+
+	/* An error means FW doesn't know about HP filter support,
+	 * it's not a problem, don't return an error.
+	 */
+	if (ret < 0)
+		dev_err(adapter->pdev_dev,
+			"HP filter region isn't supported by FW\n");
 }
 
 /**
@@ -1427,8 +1445,8 @@ static void mk_tid_release(struct sk_buff *skb, unsigned int chan,
 static void cxgb4_queue_tid_release(struct tid_info *t, unsigned int chan,
 				    unsigned int tid)
 {
-	void **p = &t->tid_tab[tid];
 	struct adapter *adap = container_of(t, struct adapter, tids);
+	void **p = &t->tid_tab[tid - t->tid_base];
 
 	spin_lock_bh(&adap->tid_release_lock);
 	*p = adap->tid_release_head;
@@ -1480,13 +1498,13 @@ static void process_tid_release_list(struct work_struct *work)
 void cxgb4_remove_tid(struct tid_info *t, unsigned int chan, unsigned int tid,
 		      unsigned short family)
 {
-	struct sk_buff *skb;
 	struct adapter *adap = container_of(t, struct adapter, tids);
+	struct sk_buff *skb;
 
-	WARN_ON(tid >= t->ntids);
+	WARN_ON(tid_out_of_range(&adap->tids, tid));
 
-	if (t->tid_tab[tid]) {
-		t->tid_tab[tid] = NULL;
+	if (t->tid_tab[tid - adap->tids.tid_base]) {
+		t->tid_tab[tid - adap->tids.tid_base] = NULL;
 		atomic_dec(&t->conns_in_use);
 		if (t->hash_base && (tid >= t->hash_base)) {
 			if (family == AF_INET6)
@@ -1518,6 +1536,7 @@ static int tid_init(struct tid_info *t)
 	struct adapter *adap = container_of(t, struct adapter, tids);
 	unsigned int max_ftids = t->nftids + t->nsftids;
 	unsigned int natids = t->natids;
+	unsigned int hpftid_bmap_size;
 	unsigned int eotid_bmap_size;
 	unsigned int stid_bmap_size;
 	unsigned int ftid_bmap_size;
@@ -1525,12 +1544,15 @@ static int tid_init(struct tid_info *t)
 
 	stid_bmap_size = BITS_TO_LONGS(t->nstids + t->nsftids);
 	ftid_bmap_size = BITS_TO_LONGS(t->nftids);
+	hpftid_bmap_size = BITS_TO_LONGS(t->nhpftids);
 	eotid_bmap_size = BITS_TO_LONGS(t->neotids);
 	size = t->ntids * sizeof(*t->tid_tab) +
 	       natids * sizeof(*t->atid_tab) +
 	       t->nstids * sizeof(*t->stid_tab) +
 	       t->nsftids * sizeof(*t->stid_tab) +
 	       stid_bmap_size * sizeof(long) +
+	       t->nhpftids * sizeof(*t->hpftid_tab) +
+	       hpftid_bmap_size * sizeof(long) +
 	       max_ftids * sizeof(*t->ftid_tab) +
 	       ftid_bmap_size * sizeof(long) +
 	       t->neotids * sizeof(*t->eotid_tab) +
@@ -1543,7 +1565,9 @@ static int tid_init(struct tid_info *t)
 	t->atid_tab = (union aopen_entry *)&t->tid_tab[t->ntids];
 	t->stid_tab = (struct serv_entry *)&t->atid_tab[natids];
 	t->stid_bmap = (unsigned long *)&t->stid_tab[t->nstids + t->nsftids];
-	t->ftid_tab = (struct filter_entry *)&t->stid_bmap[stid_bmap_size];
+	t->hpftid_tab = (struct filter_entry *)&t->stid_bmap[stid_bmap_size];
+	t->hpftid_bmap = (unsigned long *)&t->hpftid_tab[t->nhpftids];
+	t->ftid_tab = (struct filter_entry *)&t->hpftid_bmap[hpftid_bmap_size];
 	t->ftid_bmap = (unsigned long *)&t->ftid_tab[max_ftids];
 	t->eotid_tab = (struct eotid_entry *)&t->ftid_bmap[ftid_bmap_size];
 	t->eotid_bmap = (unsigned long *)&t->eotid_tab[t->neotids];
@@ -1559,6 +1583,7 @@ static int tid_init(struct tid_info *t)
 	atomic_set(&t->tids_in_use, 0);
 	atomic_set(&t->conns_in_use, 0);
 	atomic_set(&t->hash_tids_in_use, 0);
+	atomic_set(&t->eotids_in_use, 0);
 
 	/* Setup the free list for atid_tab and clear the stid bitmap. */
 	if (natids) {
@@ -1578,6 +1603,8 @@ static int tid_init(struct tid_info *t)
 			bitmap_zero(t->eotid_bmap, t->neotids);
 	}
 
+	if (t->nhpftids)
+		bitmap_zero(t->hpftid_bmap, t->nhpftids);
 	bitmap_zero(t->ftid_bmap, t->nftids);
 	return 0;
 }
@@ -1588,6 +1615,7 @@ static int tid_init(struct tid_info *t)
  *	@stid: the server TID
  *	@sip: local IP address to bind server to
  *	@sport: the server's TCP port
+ *	@vlan: the VLAN header information
  *	@queue: queue to direct messages from this server to
  *
  *	Create an IP server for the given port and address.
@@ -2582,7 +2610,7 @@ int cxgb4_create_server_filter(const struct net_device *dev, unsigned int stid,
 
 	/* Clear out filter specifications */
 	memset(&f->fs, 0, sizeof(struct ch_filter_specification));
-	f->fs.val.lport = cpu_to_be16(sport);
+	f->fs.val.lport = be16_to_cpu(sport);
 	f->fs.mask.lport  = ~0;
 	val = (u8 *)&sip;
 	if ((val[0] | val[1] | val[2] | val[3]) != 0) {
@@ -2999,7 +3027,7 @@ static int cxgb4_mgmt_set_vf_rate(struct net_device *dev, int vf,
 			      SCHED_CLASS_RATEUNIT_BITS,
 			      SCHED_CLASS_RATEMODE_ABS,
 			      pi->tx_chan, class_id, 0,
-			      max_tx_rate * 1000, 0, pktsize);
+			      max_tx_rate * 1000, 0, pktsize, 0);
 	if (ret) {
 		dev_err(adap->pdev_dev, "Err %d for Traffic Class config\n",
 			ret);
@@ -3110,7 +3138,6 @@ static int cxgb_set_mac_addr(struct net_device *dev, void *p)
 		return ret;
 
 	memcpy(dev->dev_addr, addr->sa_data, dev->addr_len);
-	pi->xact_addr_filt = ret;
 	return 0;
 }
 
@@ -3598,8 +3625,6 @@ static void cxgb4_mgmt_get_drvinfo(struct net_device *dev,
 	struct adapter *adapter = netdev2adap(dev);
 
 	strlcpy(info->driver, cxgb4_driver_name, sizeof(info->driver));
-	strlcpy(info->version, cxgb4_driver_version,
-		sizeof(info->version));
 	strlcpy(info->bus_info, pci_name(adapter->pdev),
 		sizeof(info->bus_info));
 }
@@ -4359,6 +4384,7 @@ static int adap_init0_config(struct adapter *adapter, int reset)
 			"HMA configuration failed with error %d\n", ret);
 
 	if (is_t6(adapter->params.chip)) {
+		adap_config_hpfilter(adapter);
 		ret = setup_ppod_edram(adapter);
 		if (!ret)
 			dev_info(adapter->pdev_dev, "Successfully enabled "
@@ -4668,16 +4694,6 @@ static int adap_init0(struct adapter *adap, int vpd_skip)
 	/*
 	 * Grab some of our basic fundamental operating parameters.
 	 */
-#define FW_PARAM_DEV(param) \
-	(FW_PARAMS_MNEM_V(FW_PARAMS_MNEM_DEV) | \
-	FW_PARAMS_PARAM_X_V(FW_PARAMS_PARAM_DEV_##param))
-
-#define FW_PARAM_PFVF(param) \
-	FW_PARAMS_MNEM_V(FW_PARAMS_MNEM_PFVF) | \
-	FW_PARAMS_PARAM_X_V(FW_PARAMS_PARAM_PFVF_##param)|  \
-	FW_PARAMS_PARAM_Y_V(0) | \
-	FW_PARAMS_PARAM_Z_V(0)
-
 	params[0] = FW_PARAM_PFVF(EQ_START);
 	params[1] = FW_PARAM_PFVF(L2T_START);
 	params[2] = FW_PARAM_PFVF(L2T_END);
@@ -4695,6 +4711,16 @@ static int adap_init0(struct adapter *adap, int vpd_skip)
 	adap->sge.ingr_start = val[5];
 
 	if (CHELSIO_CHIP_VERSION(adap->params.chip) > CHELSIO_T5) {
+		params[0] = FW_PARAM_PFVF(HPFILTER_START);
+		params[1] = FW_PARAM_PFVF(HPFILTER_END);
+		ret = t4_query_params(adap, adap->mbox, adap->pf, 0, 2,
+				      params, val);
+		if (ret < 0)
+			goto bye;
+
+		adap->tids.hpftid_base = val[0];
+		adap->tids.nhpftids = val[1] - val[0] + 1;
+
 		/* Read the raw mps entries. In T6, the last 2 tcam entries
 		 * are reserved for raw mac addresses (rawf = 2, one per port).
 		 */
@@ -4706,6 +4732,9 @@ static int adap_init0(struct adapter *adap, int vpd_skip)
 			adap->rawf_start = val[0];
 			adap->rawf_cnt = val[1] - val[0] + 1;
 		}
+
+		adap->tids.tid_base =
+			t4_read_reg(adap, LE_DB_ACTIVE_TABLE_START_INDEX_A);
 	}
 
 	/* qids (ingress/egress) returned from firmware can be anywhere
@@ -5058,8 +5087,6 @@ static int adap_init0(struct adapter *adap, int vpd_skip)
 		}
 		adap->params.crypto = ntohs(caps_cmd.cryptocaps);
 	}
-#undef FW_PARAM_PFVF
-#undef FW_PARAM_DEV
 
 	/* The MTU/MSS Table is initialized by now, so load their values.  If
 	 * we're initializing the adapter, then we'll make any modifications
@@ -5351,12 +5378,11 @@ static inline bool is_x_10g_port(const struct link_config *lc)
 static int cfg_queues(struct adapter *adap)
 {
 	u32 avail_qsets, avail_eth_qsets, avail_uld_qsets;
+	u32 ncpus = num_online_cpus();
 	u32 niqflint, neq, num_ulds;
 	struct sge *s = &adap->sge;
 	u32 i, n10g = 0, qidx = 0;
-#ifndef CONFIG_CHELSIO_T4_DCB
-	int q10g = 0;
-#endif
+	u32 q10g = 0, q1g;
 
 	/* Reduce memory usage in kdump environment, disable all offload. */
 	if (is_kdump_kernel() || (is_uld(adap) && t4_uld_mem_alloc(adap))) {
@@ -5394,44 +5420,50 @@ static int cfg_queues(struct adapter *adap)
 		n10g += is_x_10g_port(&adap2pinfo(adap, i)->link_cfg);
 
 	avail_eth_qsets = min_t(u32, avail_qsets, MAX_ETH_QSETS);
+
+	/* We default to 1 queue per non-10G port and up to # of cores queues
+	 * per 10G port.
+	 */
+	if (n10g)
+		q10g = (avail_eth_qsets - (adap->params.nports - n10g)) / n10g;
+
 #ifdef CONFIG_CHELSIO_T4_DCB
 	/* For Data Center Bridging support we need to be able to support up
 	 * to 8 Traffic Priorities; each of which will be assigned to its
 	 * own TX Queue in order to prevent Head-Of-Line Blocking.
 	 */
+	q1g = 8;
 	if (adap->params.nports * 8 > avail_eth_qsets) {
 		dev_err(adap->pdev_dev, "DCB avail_eth_qsets=%d < %d!\n",
 			avail_eth_qsets, adap->params.nports * 8);
 		return -ENOMEM;
 	}
 
-	for_each_port(adap, i) {
-		struct port_info *pi = adap2pinfo(adap, i);
+	if (adap->params.nports * ncpus < avail_eth_qsets)
+		q10g = max(8U, ncpus);
+	else
+		q10g = max(8U, q10g);
 
-		pi->first_qset = qidx;
-		pi->nqsets = is_kdump_kernel() ? 1 : 8;
-		qidx += pi->nqsets;
-	}
+	while ((q10g * n10g) >
+	       (avail_eth_qsets - (adap->params.nports - n10g) * q1g))
+		q10g--;
+
 #else /* !CONFIG_CHELSIO_T4_DCB */
-	/* We default to 1 queue per non-10G port and up to # of cores queues
-	 * per 10G port.
-	 */
-	if (n10g)
-		q10g = (avail_eth_qsets - (adap->params.nports - n10g)) / n10g;
-	if (q10g > netif_get_num_default_rss_queues())
-		q10g = netif_get_num_default_rss_queues();
-
-	if (is_kdump_kernel())
+	q1g = 1;
+	q10g = min(q10g, ncpus);
+#endif /* !CONFIG_CHELSIO_T4_DCB */
+	if (is_kdump_kernel()) {
 		q10g = 1;
+		q1g = 1;
+	}
 
 	for_each_port(adap, i) {
 		struct port_info *pi = adap2pinfo(adap, i);
 
 		pi->first_qset = qidx;
-		pi->nqsets = is_x_10g_port(&pi->link_cfg) ? q10g : 1;
+		pi->nqsets = is_x_10g_port(&pi->link_cfg) ? q10g : q1g;
 		qidx += pi->nqsets;
 	}
-#endif /* !CONFIG_CHELSIO_T4_DCB */
 
 	s->ethqsets = qidx;
 	s->max_ethqsets = qidx;   /* MSI-X may lower it later */
@@ -5443,7 +5475,7 @@ static int cfg_queues(struct adapter *adap)
 		 * capped by the number of available cores.
 		 */
 		num_ulds = adap->num_uld + adap->num_ofld_uld;
-		i = min_t(u32, MAX_OFLD_QSETS, num_online_cpus());
+		i = min_t(u32, MAX_OFLD_QSETS, ncpus);
 		avail_uld_qsets = roundup(i, adap->params.nports);
 		if (avail_qsets < num_ulds * adap->params.nports) {
 			adap->params.offload = 0;
@@ -6036,6 +6068,79 @@ static int cxgb4_iov_configure(struct pci_dev *pdev, int num_vfs)
 }
 #endif /* CONFIG_PCI_IOV */
 
+#if defined(CONFIG_CHELSIO_TLS_DEVICE)
+
+static int cxgb4_ktls_dev_add(struct net_device *netdev, struct sock *sk,
+			      enum tls_offload_ctx_dir direction,
+			      struct tls_crypto_info *crypto_info,
+			      u32 tcp_sn)
+{
+	struct adapter *adap = netdev2adap(netdev);
+	int ret = 0;
+
+	mutex_lock(&uld_mutex);
+	if (!adap->uld[CXGB4_ULD_CRYPTO].handle) {
+		dev_err(adap->pdev_dev, "chcr driver is not loaded\n");
+		ret = -EOPNOTSUPP;
+		goto out_unlock;
+	}
+
+	if (!adap->uld[CXGB4_ULD_CRYPTO].tlsdev_ops) {
+		dev_err(adap->pdev_dev,
+			"chcr driver has no registered tlsdev_ops()\n");
+		ret = -EOPNOTSUPP;
+		goto out_unlock;
+	}
+
+	ret = cxgb4_set_ktls_feature(adap, FW_PARAMS_PARAM_DEV_KTLS_HW_ENABLE);
+	if (ret)
+		goto out_unlock;
+
+	ret = adap->uld[CXGB4_ULD_CRYPTO].tlsdev_ops->tls_dev_add(netdev, sk,
+								  direction,
+								  crypto_info,
+								  tcp_sn);
+	/* if there is a failure, clear the refcount */
+	if (ret)
+		cxgb4_set_ktls_feature(adap,
+				       FW_PARAMS_PARAM_DEV_KTLS_HW_DISABLE);
+out_unlock:
+	mutex_unlock(&uld_mutex);
+	return ret;
+}
+
+static void cxgb4_ktls_dev_del(struct net_device *netdev,
+			       struct tls_context *tls_ctx,
+			       enum tls_offload_ctx_dir direction)
+{
+	struct adapter *adap = netdev2adap(netdev);
+
+	mutex_lock(&uld_mutex);
+	if (!adap->uld[CXGB4_ULD_CRYPTO].handle) {
+		dev_err(adap->pdev_dev, "chcr driver is not loaded\n");
+		goto out_unlock;
+	}
+
+	if (!adap->uld[CXGB4_ULD_CRYPTO].tlsdev_ops) {
+		dev_err(adap->pdev_dev,
+			"chcr driver has no registered tlsdev_ops\n");
+		goto out_unlock;
+	}
+
+	adap->uld[CXGB4_ULD_CRYPTO].tlsdev_ops->tls_dev_del(netdev, tls_ctx,
+							    direction);
+	cxgb4_set_ktls_feature(adap, FW_PARAMS_PARAM_DEV_KTLS_HW_DISABLE);
+
+out_unlock:
+	mutex_unlock(&uld_mutex);
+}
+
+static const struct tlsdev_ops cxgb4_ktls_ops = {
+	.tls_dev_add = cxgb4_ktls_dev_add,
+	.tls_dev_del = cxgb4_ktls_dev_del,
+};
+#endif /* CONFIG_CHELSIO_TLS_DEVICE */
+
 static int init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 {
 	struct net_device *netdev;
@@ -6050,8 +6155,6 @@ static int init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	u16 device_id;
 	int i, err;
 	u32 whoami;
-
-	printk_once(KERN_INFO "%s - version %s\n", DRV_DESC, DRV_VERSION);
 
 	err = pci_request_regions(pdev, KBUILD_MODNAME);
 	if (err) {
@@ -6287,7 +6390,14 @@ static int init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 			netdev->hw_features |= NETIF_F_HIGHDMA;
 		netdev->features |= netdev->hw_features;
 		netdev->vlan_features = netdev->features & VLAN_FEAT;
-
+#if defined(CONFIG_CHELSIO_TLS_DEVICE)
+		if (pi->adapter->params.crypto & FW_CAPS_CONFIG_TLS_HW) {
+			netdev->hw_features |= NETIF_F_HW_TLS_TX;
+			netdev->tlsdev_ops = &cxgb4_ktls_ops;
+			/* initialize the refcount */
+			refcount_set(&pi->adapter->chcr_ktls.ktls_refcount, 0);
+		}
+#endif
 		netdev->priv_flags |= IFF_UNICAST_FLT;
 
 		/* MTU range: 81 - 9600 */
@@ -6494,11 +6604,8 @@ fw_attach_fail:
 	/* PCIe EEH recovery on powerpc platforms needs fundamental reset */
 	pdev->needs_freset = 1;
 
-	if (is_uld(adapter)) {
-		mutex_lock(&uld_mutex);
-		list_add_tail(&adapter->list_node, &adapter_list);
-		mutex_unlock(&uld_mutex);
-	}
+	if (is_uld(adapter))
+		cxgb4_uld_enable(adapter);
 
 	if (!is_t4(adapter->params.chip))
 		cxgb4_ptp_init(adapter);
@@ -6646,6 +6753,10 @@ static void shutdown_one(struct pci_dev *pdev)
 		for_each_port(adapter, i)
 			if (adapter->port[i]->reg_state == NETREG_REGISTERED)
 				cxgb_close(adapter->port[i]);
+
+		rtnl_lock();
+		cxgb4_mqprio_stop_offload(adapter);
+		rtnl_unlock();
 
 		if (is_uld(adapter)) {
 			detach_ulds(adapter);

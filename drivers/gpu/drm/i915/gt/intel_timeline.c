@@ -15,20 +15,15 @@
 #define ptr_set_bit(ptr, bit) ((typeof(ptr))((unsigned long)(ptr) | BIT(bit)))
 #define ptr_test_bit(ptr, bit) ((unsigned long)(ptr) & BIT(bit))
 
+#define CACHELINE_BITS 6
+#define CACHELINE_FREE CACHELINE_BITS
+
 struct intel_timeline_hwsp {
 	struct intel_gt *gt;
 	struct intel_gt_timelines *gt_timelines;
 	struct list_head free_link;
 	struct i915_vma *vma;
 	u64 free_bitmap;
-};
-
-struct intel_timeline_cacheline {
-	struct i915_active active;
-	struct intel_timeline_hwsp *hwsp;
-	void *vaddr;
-#define CACHELINE_BITS 6
-#define CACHELINE_FREE CACHELINE_BITS
 };
 
 static struct i915_vma *__hwsp_alloc(struct intel_gt *gt)
@@ -124,6 +119,15 @@ static void __idle_hwsp_free(struct intel_timeline_hwsp *hwsp, int cacheline)
 	spin_unlock_irqrestore(&gt->hwsp_lock, flags);
 }
 
+static void __rcu_cacheline_free(struct rcu_head *rcu)
+{
+	struct intel_timeline_cacheline *cl =
+		container_of(rcu, typeof(*cl), rcu);
+
+	i915_active_fini(&cl->active);
+	kfree(cl);
+}
+
 static void __idle_cacheline_free(struct intel_timeline_cacheline *cl)
 {
 	GEM_BUG_ON(!i915_active_is_idle(&cl->active));
@@ -132,8 +136,7 @@ static void __idle_cacheline_free(struct intel_timeline_cacheline *cl)
 	i915_vma_put(cl->hwsp->vma);
 	__idle_hwsp_free(cl->hwsp, ptr_unmask_bits(cl->vaddr, CACHELINE_BITS));
 
-	i915_active_fini(&cl->active);
-	kfree(cl);
+	call_rcu(&cl->rcu, __rcu_cacheline_free);
 }
 
 __i915_active_call
@@ -197,16 +200,20 @@ static void cacheline_release(struct intel_timeline_cacheline *cl)
 
 static void cacheline_free(struct intel_timeline_cacheline *cl)
 {
+	if (!i915_active_acquire_if_busy(&cl->active)) {
+		__idle_cacheline_free(cl);
+		return;
+	}
+
 	GEM_BUG_ON(ptr_test_bit(cl->vaddr, CACHELINE_FREE));
 	cl->vaddr = ptr_set_bit(cl->vaddr, CACHELINE_FREE);
 
-	if (i915_active_is_idle(&cl->active))
-		__idle_cacheline_free(cl);
+	i915_active_release(&cl->active);
 }
 
-int intel_timeline_init(struct intel_timeline *timeline,
-			struct intel_gt *gt,
-			struct i915_vma *hwsp)
+static int intel_timeline_init(struct intel_timeline *timeline,
+			       struct intel_gt *gt,
+			       struct i915_vma *hwsp)
 {
 	void *vaddr;
 
@@ -254,7 +261,7 @@ int intel_timeline_init(struct intel_timeline *timeline,
 
 	mutex_init(&timeline->mutex);
 
-	INIT_ACTIVE_FENCE(&timeline->last_request, &timeline->mutex);
+	INIT_ACTIVE_FENCE(&timeline->last_request);
 	INIT_LIST_HEAD(&timeline->requests);
 
 	i915_syncmap_init(&timeline->sync);
@@ -262,7 +269,7 @@ int intel_timeline_init(struct intel_timeline *timeline,
 	return 0;
 }
 
-static void timelines_init(struct intel_gt *gt)
+void intel_gt_init_timelines(struct intel_gt *gt)
 {
 	struct intel_gt_timelines *timelines = &gt->timelines;
 
@@ -273,12 +280,7 @@ static void timelines_init(struct intel_gt *gt)
 	INIT_LIST_HEAD(&timelines->hwsp_free_list);
 }
 
-void intel_timelines_init(struct drm_i915_private *i915)
-{
-	timelines_init(&i915->gt);
-}
-
-void intel_timeline_fini(struct intel_timeline *timeline)
+static void intel_timeline_fini(struct intel_timeline *timeline)
 {
 	GEM_BUG_ON(atomic_read(&timeline->pin_count));
 	GEM_BUG_ON(!list_empty(&timeline->requests));
@@ -318,7 +320,7 @@ int intel_timeline_pin(struct intel_timeline *tl)
 	if (atomic_add_unless(&tl->pin_count, 1, 0))
 		return 0;
 
-	err = i915_vma_pin(tl->hwsp_ggtt, 0, 0, PIN_GLOBAL | PIN_HIGH);
+	err = i915_ggtt_pin(tl->hwsp_ggtt, 0, PIN_HIGH);
 	if (err)
 		return err;
 
@@ -335,10 +337,16 @@ int intel_timeline_pin(struct intel_timeline *tl)
 	return 0;
 }
 
+void intel_timeline_reset_seqno(const struct intel_timeline *tl)
+{
+	/* Must be pinned to be writable, and no requests in flight. */
+	GEM_BUG_ON(!atomic_read(&tl->pin_count));
+	WRITE_ONCE(*(u32 *)tl->hwsp_seqno, tl->seqno);
+}
+
 void intel_timeline_enter(struct intel_timeline *tl)
 {
 	struct intel_gt_timelines *timelines = &tl->gt->timelines;
-	unsigned long flags;
 
 	/*
 	 * Pretend we are serialised by the timeline->mutex.
@@ -359,21 +367,27 @@ void intel_timeline_enter(struct intel_timeline *tl)
 	 * use atomic to manipulate tl->active_count.
 	 */
 	lockdep_assert_held(&tl->mutex);
-	GEM_BUG_ON(!atomic_read(&tl->pin_count));
 
 	if (atomic_add_unless(&tl->active_count, 1, 0))
 		return;
 
-	spin_lock_irqsave(&timelines->lock, flags);
-	if (!atomic_fetch_inc(&tl->active_count))
+	spin_lock(&timelines->lock);
+	if (!atomic_fetch_inc(&tl->active_count)) {
+		/*
+		 * The HWSP is volatile, and may have been lost while inactive,
+		 * e.g. across suspend/resume. Be paranoid, and ensure that
+		 * the HWSP value matches our seqno so we don't proclaim
+		 * the next request as already complete.
+		 */
+		intel_timeline_reset_seqno(tl);
 		list_add_tail(&tl->link, &timelines->active_list);
-	spin_unlock_irqrestore(&timelines->lock, flags);
+	}
+	spin_unlock(&timelines->lock);
 }
 
 void intel_timeline_exit(struct intel_timeline *tl)
 {
 	struct intel_gt_timelines *timelines = &tl->gt->timelines;
-	unsigned long flags;
 
 	/* See intel_timeline_enter() */
 	lockdep_assert_held(&tl->mutex);
@@ -382,10 +396,10 @@ void intel_timeline_exit(struct intel_timeline *tl)
 	if (atomic_add_unless(&tl->active_count, -1, 1))
 		return;
 
-	spin_lock_irqsave(&timelines->lock, flags);
+	spin_lock(&timelines->lock);
 	if (atomic_dec_and_test(&tl->active_count))
 		list_del(&tl->link);
-	spin_unlock_irqrestore(&timelines->lock, flags);
+	spin_unlock(&timelines->lock);
 
 	/*
 	 * Since this timeline is idle, all bariers upon which we were waiting
@@ -419,6 +433,8 @@ __intel_timeline_get_seqno(struct intel_timeline *tl,
 	void *vaddr;
 	int err;
 
+	might_lock(&tl->gt->ggtt->vm.mutex);
+
 	/*
 	 * If there is an outstanding GPU reference to this cacheline,
 	 * such as it being sampled by a HW semaphore on another timeline,
@@ -444,7 +460,7 @@ __intel_timeline_get_seqno(struct intel_timeline *tl,
 		goto err_rollback;
 	}
 
-	err = i915_vma_pin(vma, 0, 0, PIN_GLOBAL | PIN_HIGH);
+	err = i915_ggtt_pin(vma, 0, PIN_HIGH);
 	if (err) {
 		__idle_hwsp_free(vma->private, cacheline);
 		goto err_rollback;
@@ -521,46 +537,37 @@ int intel_timeline_read_hwsp(struct i915_request *from,
 			     struct i915_request *to,
 			     u32 *hwsp)
 {
-	struct intel_timeline *tl;
+	struct intel_timeline_cacheline *cl;
 	int err;
 
+	GEM_BUG_ON(!rcu_access_pointer(from->hwsp_cacheline));
+
 	rcu_read_lock();
-	tl = rcu_dereference(from->timeline);
-	if (i915_request_completed(from) || !kref_get_unless_zero(&tl->kref))
-		tl = NULL;
+	cl = rcu_dereference(from->hwsp_cacheline);
+	if (i915_request_completed(from)) /* confirm cacheline is valid */
+		goto unlock;
+	if (unlikely(!i915_active_acquire_if_busy(&cl->active)))
+		goto unlock; /* seqno wrapped and completed! */
+	if (unlikely(i915_request_completed(from)))
+		goto release;
 	rcu_read_unlock();
-	if (!tl) /* already completed */
-		return 1;
 
-	GEM_BUG_ON(rcu_access_pointer(to->timeline) == tl);
+	err = cacheline_ref(cl, to);
+	if (err)
+		goto out;
 
-	err = -EBUSY;
-	if (mutex_trylock(&tl->mutex)) {
-		struct intel_timeline_cacheline *cl = from->hwsp_cacheline;
+	*hwsp = i915_ggtt_offset(cl->hwsp->vma) +
+		ptr_unmask_bits(cl->vaddr, CACHELINE_BITS) * CACHELINE_BYTES;
 
-		if (i915_request_completed(from)) {
-			err = 1;
-			goto unlock;
-		}
-
-		err = cacheline_ref(cl, to);
-		if (err)
-			goto unlock;
-
-		if (likely(cl == tl->hwsp_cacheline)) {
-			*hwsp = tl->hwsp_offset;
-		} else { /* across a seqno wrap, recover the original offset */
-			*hwsp = i915_ggtt_offset(cl->hwsp->vma) +
-				ptr_unmask_bits(cl->vaddr, CACHELINE_BITS) *
-				CACHELINE_BYTES;
-		}
-
-unlock:
-		mutex_unlock(&tl->mutex);
-	}
-	intel_timeline_put(tl);
-
+out:
+	i915_active_release(&cl->active);
 	return err;
+
+release:
+	i915_active_release(&cl->active);
+unlock:
+	rcu_read_unlock();
+	return 1;
 }
 
 void intel_timeline_unpin(struct intel_timeline *tl)
@@ -583,17 +590,12 @@ void __intel_timeline_free(struct kref *kref)
 	kfree_rcu(timeline, rcu);
 }
 
-static void timelines_fini(struct intel_gt *gt)
+void intel_gt_fini_timelines(struct intel_gt *gt)
 {
 	struct intel_gt_timelines *timelines = &gt->timelines;
 
 	GEM_BUG_ON(!list_empty(&timelines->active_list));
 	GEM_BUG_ON(!list_empty(&timelines->hwsp_free_list));
-}
-
-void intel_timelines_fini(struct drm_i915_private *i915)
-{
-	timelines_fini(&i915->gt);
 }
 
 #if IS_ENABLED(CONFIG_DRM_I915_SELFTEST)

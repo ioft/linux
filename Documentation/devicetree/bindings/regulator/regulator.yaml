@@ -123,9 +123,8 @@ properties:
       0: Disable active discharge.
       1: Enable active discharge.
       Absence of this property will leave configuration to default.
-    allOf:
-      - $ref: "/schemas/types.yaml#/definitions/uint32"
-      - enum: [ 0, 1 ]
+    $ref: "/schemas/types.yaml#/definitions/uint32"
+    enum: [0, 1]
 
   regulator-coupled-with:
     description: Regulators with which the regulator is coupled. The linkage
@@ -191,7 +190,7 @@ patternProperties:
 
 examples:
   - |
-    xyzreg: regulator@0 {
+    xyzreg: regulator {
       regulator-min-microvolt = <1000000>;
       regulator-max-microvolt = <2500000>;
       regulator-always-on;

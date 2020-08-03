@@ -40,6 +40,13 @@ enum amd_chip_flags {
 	AMD_EXP_HW_SUPPORT = 0x00080000UL,
 };
 
+enum amd_apu_flags {
+	AMD_APU_IS_RAVEN = 0x00000001UL,
+	AMD_APU_IS_RAVEN2 = 0x00000002UL,
+	AMD_APU_IS_PICASSO = 0x00000004UL,
+	AMD_APU_IS_RENOIR = 0x00000008UL,
+};
+
 enum amd_ip_block_type {
 	AMD_IP_BLOCK_TYPE_COMMON,
 	AMD_IP_BLOCK_TYPE_GMC,
@@ -53,7 +60,8 @@ enum amd_ip_block_type {
 	AMD_IP_BLOCK_TYPE_VCE,
 	AMD_IP_BLOCK_TYPE_ACP,
 	AMD_IP_BLOCK_TYPE_VCN,
-	AMD_IP_BLOCK_TYPE_MES
+	AMD_IP_BLOCK_TYPE_MES,
+	AMD_IP_BLOCK_TYPE_JPEG
 };
 
 enum amd_clockgating_state {
@@ -99,6 +107,7 @@ enum amd_powergating_state {
 #define AMD_CG_SUPPORT_IH_CG			(1 << 27)
 #define AMD_CG_SUPPORT_ATHUB_LS			(1 << 28)
 #define AMD_CG_SUPPORT_ATHUB_MGCG		(1 << 29)
+#define AMD_CG_SUPPORT_JPEG_MGCG		(1 << 30)
 /* PG flags */
 #define AMD_PG_SUPPORT_GFX_PG			(1 << 0)
 #define AMD_PG_SUPPORT_GFX_SMG			(1 << 1)
@@ -117,6 +126,7 @@ enum amd_powergating_state {
 #define AMD_PG_SUPPORT_VCN			(1 << 14)
 #define AMD_PG_SUPPORT_VCN_DPG			(1 << 15)
 #define AMD_PG_SUPPORT_ATHUB			(1 << 16)
+#define AMD_PG_SUPPORT_JPEG			(1 << 17)
 
 enum PP_FEATURE_MASK {
 	PP_SCLK_DPM_MASK = 0x1,
@@ -145,6 +155,13 @@ enum DC_FEATURE_MASK {
 	DC_MULTI_MON_PP_MCLK_SWITCH_MASK = 0x2,
 	DC_DISABLE_FRACTIONAL_PWM_MASK = 0x4,
 	DC_PSR_MASK = 0x8,
+};
+
+enum DC_DEBUG_MASK {
+	DC_DISABLE_PIPE_SPLIT = 0x1,
+	DC_DISABLE_STUTTER = 0x2,
+	DC_DISABLE_DSC = 0x4,
+	DC_DISABLE_CLOCK_GATING = 0x8
 };
 
 enum amd_dpm_forced_level;

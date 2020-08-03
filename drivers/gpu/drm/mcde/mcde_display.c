@@ -498,24 +498,20 @@ static void mcde_configure_channel(struct mcde *mcde, enum mcde_channel ch,
 	}
 
 	/* Set up channel 0 sync (based on chnl_update_registers()) */
-	if (mcde->te_sync) {
-		/*
-		 * Turn on hardware TE0 synchronization
-		 */
+	if (mcde->video_mode || mcde->te_sync)
 		val = MCDE_CHNLXSYNCHMOD_SRC_SYNCH_HARDWARE
 			<< MCDE_CHNLXSYNCHMOD_SRC_SYNCH_SHIFT;
-		val |= MCDE_CHNLXSYNCHMOD_OUT_SYNCH_SRC_TE0
-			<< MCDE_CHNLXSYNCHMOD_OUT_SYNCH_SRC_SHIFT;
-	} else {
-		/*
-		 * Set up sync source to software, out sync formatter
-		 * Code mostly from mcde_hw.c chnl_update_registers()
-		 */
+	else
 		val = MCDE_CHNLXSYNCHMOD_SRC_SYNCH_SOFTWARE
 			<< MCDE_CHNLXSYNCHMOD_SRC_SYNCH_SHIFT;
+
+	if (mcde->te_sync)
+		val |= MCDE_CHNLXSYNCHMOD_OUT_SYNCH_SRC_TE0
+			<< MCDE_CHNLXSYNCHMOD_OUT_SYNCH_SRC_SHIFT;
+	else
 		val |= MCDE_CHNLXSYNCHMOD_OUT_SYNCH_SRC_FORMATTER
 			<< MCDE_CHNLXSYNCHMOD_OUT_SYNCH_SRC_SHIFT;
-	}
+
 	writel(val, mcde->regs + sync);
 
 	/* Set up pixels per line and lines per frame */
@@ -816,7 +812,7 @@ static void mcde_display_enable(struct drm_simple_display_pipe *pipe,
 	struct drm_crtc *crtc = &pipe->crtc;
 	struct drm_plane *plane = &pipe->plane;
 	struct drm_device *drm = crtc->dev;
-	struct mcde *mcde = drm->dev_private;
+	struct mcde *mcde = to_mcde(drm);
 	const struct drm_display_mode *mode = &cstate->mode;
 	struct drm_framebuffer *fb = plane->state->fb;
 	u32 format = fb->format->format;
@@ -934,9 +930,16 @@ static void mcde_display_enable(struct drm_simple_display_pipe *pipe,
 		val = readl(mcde->regs + MCDE_CRC);
 		val |= MCDE_CRC_SYCEN0;
 		writel(val, mcde->regs + MCDE_CRC);
-
-		drm_crtc_vblank_on(crtc);
 	}
+
+	drm_crtc_vblank_on(crtc);
+
+	if (mcde->video_mode)
+		/*
+		 * Keep FIFO permanently enabled in video mode,
+		 * otherwise MCDE will stop feeding data to the panel.
+		 */
+		mcde_enable_fifo(mcde, MCDE_FIFO_A);
 
 	dev_info(drm->dev, "MCDE display is enabled\n");
 }
@@ -945,13 +948,22 @@ static void mcde_display_disable(struct drm_simple_display_pipe *pipe)
 {
 	struct drm_crtc *crtc = &pipe->crtc;
 	struct drm_device *drm = crtc->dev;
-	struct mcde *mcde = drm->dev_private;
+	struct mcde *mcde = to_mcde(drm);
+	struct drm_pending_vblank_event *event;
 
-	if (mcde->te_sync)
-		drm_crtc_vblank_off(crtc);
+	drm_crtc_vblank_off(crtc);
 
 	/* Disable FIFO A flow */
 	mcde_disable_fifo(mcde, MCDE_FIFO_A, true);
+
+	event = crtc->state->event;
+	if (event) {
+		crtc->state->event = NULL;
+
+		spin_lock_irq(&crtc->dev->event_lock);
+		drm_crtc_send_vblank_event(crtc, event);
+		spin_unlock_irq(&crtc->dev->event_lock);
+	}
 
 	dev_info(drm->dev, "MCDE display is disabled\n");
 }
@@ -1008,7 +1020,7 @@ static void mcde_display_update(struct drm_simple_display_pipe *pipe,
 {
 	struct drm_crtc *crtc = &pipe->crtc;
 	struct drm_device *drm = crtc->dev;
-	struct mcde *mcde = drm->dev_private;
+	struct mcde *mcde = to_mcde(drm);
 	struct drm_pending_vblank_event *event = crtc->state->event;
 	struct drm_plane *plane = &pipe->plane;
 	struct drm_plane_state *pstate = plane->state;
@@ -1048,8 +1060,14 @@ static void mcde_display_update(struct drm_simple_display_pipe *pipe,
 	 */
 	if (fb) {
 		mcde_set_extsrc(mcde, drm_fb_cma_get_gem_addr(fb, pstate, 0));
-		/* Send a single frame using software sync */
-		mcde_display_send_one_frame(mcde);
+		if (!mcde->video_mode) {
+			/*
+			 * Send a single frame using software sync if the flow
+			 * is not active yet.
+			 */
+			if (mcde->flow_active == 0)
+				mcde_display_send_one_frame(mcde);
+		}
 		dev_info_once(mcde->dev, "sent first display update\n");
 	} else {
 		/*
@@ -1065,7 +1083,7 @@ static int mcde_display_enable_vblank(struct drm_simple_display_pipe *pipe)
 {
 	struct drm_crtc *crtc = &pipe->crtc;
 	struct drm_device *drm = crtc->dev;
-	struct mcde *mcde = drm->dev_private;
+	struct mcde *mcde = to_mcde(drm);
 	u32 val;
 
 	/* Enable all VBLANK IRQs */
@@ -1084,7 +1102,7 @@ static void mcde_display_disable_vblank(struct drm_simple_display_pipe *pipe)
 {
 	struct drm_crtc *crtc = &pipe->crtc;
 	struct drm_device *drm = crtc->dev;
-	struct mcde *mcde = drm->dev_private;
+	struct mcde *mcde = to_mcde(drm);
 
 	/* Disable all VBLANK IRQs */
 	writel(0, mcde->regs + MCDE_IMSCPP);
@@ -1097,12 +1115,14 @@ static struct drm_simple_display_pipe_funcs mcde_display_funcs = {
 	.enable = mcde_display_enable,
 	.disable = mcde_display_disable,
 	.update = mcde_display_update,
+	.enable_vblank = mcde_display_enable_vblank,
+	.disable_vblank = mcde_display_disable_vblank,
 	.prepare_fb = drm_gem_fb_simple_display_pipe_prepare_fb,
 };
 
 int mcde_display_init(struct drm_device *drm)
 {
-	struct mcde *mcde = drm->dev_private;
+	struct mcde *mcde = to_mcde(drm);
 	int ret;
 	static const u32 formats[] = {
 		DRM_FORMAT_ARGB8888,
@@ -1122,12 +1142,6 @@ int mcde_display_init(struct drm_device *drm)
 		DRM_FORMAT_BGR565,
 		DRM_FORMAT_YUV422,
 	};
-
-	/* Provide vblank only when we have TE enabled */
-	if (mcde->te_sync) {
-		mcde_display_funcs.enable_vblank = mcde_display_enable_vblank;
-		mcde_display_funcs.disable_vblank = mcde_display_disable_vblank;
-	}
 
 	ret = drm_simple_display_pipe_init(drm, &mcde->pipe,
 					   &mcde_display_funcs,

@@ -158,6 +158,8 @@ struct intel_device_info {
 
 	enum intel_platform platform;
 
+	unsigned int dma_mask_size; /* available DMA address bits */
+
 	enum intel_ppgtt_type ppgtt_type;
 	unsigned int ppgtt_size; /* log2, e.g. 31/32/48 bits */
 
@@ -168,6 +170,7 @@ struct intel_device_info {
 	u32 display_mmio_offset;
 
 	u8 pipe_mask;
+	u8 cpu_transcoder_mask;
 
 #define DEFINE_FLAG(name) u8 name:1
 	DEV_INFO_FOR_EACH_FLAG(DEFINE_FLAG);
@@ -180,6 +183,7 @@ struct intel_device_info {
 	} display;
 
 	u16 ddb_size; /* in blocks */
+	u8 num_supported_dbuf_slices; /* number of DBuf slices */
 
 	/* Register offsets for the various display pipes and transcoders */
 	int pipe_offsets[I915_MAX_TRANSCODERS];
@@ -215,7 +219,10 @@ struct intel_runtime_info {
 	/* Slice/subslice/EU info */
 	struct sseu_dev_info sseu;
 
-	u32 cs_timestamp_frequency_khz;
+	u32 rawclk_freq;
+
+	u32 cs_timestamp_frequency_hz;
+	u32 cs_timestamp_period_ns;
 
 	/* Media engine access to SFC per instance */
 	u8 vdbox_sfc_access;
@@ -230,12 +237,13 @@ const char *intel_platform_name(enum intel_platform platform);
 
 void intel_device_info_subplatform_init(struct drm_i915_private *dev_priv);
 void intel_device_info_runtime_init(struct drm_i915_private *dev_priv);
-void intel_device_info_dump_flags(const struct intel_device_info *info,
-				  struct drm_printer *p);
-void intel_device_info_dump_runtime(const struct intel_runtime_info *info,
+
+void intel_device_info_print_static(const struct intel_device_info *info,
 				    struct drm_printer *p);
-void intel_device_info_dump_topology(const struct sseu_dev_info *sseu,
+void intel_device_info_print_runtime(const struct intel_runtime_info *info,
 				     struct drm_printer *p);
+void intel_device_info_print_topology(const struct sseu_dev_info *sseu,
+				      struct drm_printer *p);
 
 void intel_device_info_init_mmio(struct drm_i915_private *dev_priv);
 

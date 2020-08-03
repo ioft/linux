@@ -5,7 +5,7 @@
  * Author: Christopher Harvey <charvey@matrox.com>
  */
 
-#include <drm/drm_pci.h>
+#include <linux/pci.h>
 
 #include "mgag200_drv.h"
 
@@ -208,8 +208,7 @@ int mgag200_cursor_init(struct mga_device *mdev)
 		return -ENOMEM;
 
 	for (i = 0; i < ncursors; ++i) {
-		gbo = drm_gem_vram_create(dev, &dev->vram_mm->bdev,
-					  size, 0, false);
+		gbo = drm_gem_vram_create(dev, size, 0);
 		if (IS_ERR(gbo)) {
 			ret = PTR_ERR(gbo);
 			goto err_drm_gem_vram_put;
@@ -261,7 +260,7 @@ int mgag200_crtc_cursor_set(struct drm_crtc *crtc, struct drm_file *file_priv,
 			    uint32_t handle, uint32_t width, uint32_t height)
 {
 	struct drm_device *dev = crtc->dev;
-	struct mga_device *mdev = (struct mga_device *)dev->dev_private;
+	struct mga_device *mdev = to_mga_device(dev);
 	struct drm_gem_object *obj;
 	struct drm_gem_vram_object *gbo = NULL;
 	int ret;
@@ -308,7 +307,7 @@ err_drm_gem_object_put_unlocked:
 
 int mgag200_crtc_cursor_move(struct drm_crtc *crtc, int x, int y)
 {
-	struct mga_device *mdev = (struct mga_device *)crtc->dev->dev_private;
+	struct mga_device *mdev = to_mga_device(crtc->dev);
 
 	/* Our origin is at (64,64) */
 	x += 64;

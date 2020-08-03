@@ -12,6 +12,7 @@
 #include <drm/drm_crtc_helper.h>
 #include <drm/drm_encoder.h>
 #include <drm/drm_probe_helper.h>
+#include <drm/drm_vblank.h>
 #include <linux/gpio.h>
 #include "gma_display.h"
 
@@ -182,6 +183,8 @@ struct gma_crtc {
 	struct psb_intel_crtc_state *crtc_state;
 
 	const struct gma_clock_funcs *clock_funcs;
+
+	struct drm_pending_vblank_event *page_flip_event;
 };
 
 #define to_gma_crtc(x)	\
@@ -249,7 +252,6 @@ extern int psb_intel_lvds_set_property(struct drm_connector *connector,
 					struct drm_property *property,
 					uint64_t value);
 extern void psb_intel_lvds_destroy(struct drm_connector *connector);
-extern const struct drm_encoder_funcs psb_intel_lvds_enc_funcs;
 
 /* intel_gmbus.c */
 extern void gma_intel_i2c_reset(struct drm_device *dev);

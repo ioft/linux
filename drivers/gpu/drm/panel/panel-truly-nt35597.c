@@ -454,9 +454,9 @@ static int truly_nt35597_enable(struct drm_panel *panel)
 	return 0;
 }
 
-static int truly_nt35597_get_modes(struct drm_panel *panel)
+static int truly_nt35597_get_modes(struct drm_panel *panel,
+				   struct drm_connector *connector)
 {
-	struct drm_connector *connector = panel->connector;
 	struct truly_nt35597 *ctx = panel_to_ctx(panel);
 	struct drm_display_mode *mode;
 	const struct nt35597_config *config;
@@ -490,9 +490,7 @@ static int truly_nt35597_panel_add(struct truly_nt35597 *ctx)
 {
 	struct device *dev = ctx->dev;
 	int ret, i;
-	const struct nt35597_config *config;
 
-	config = ctx->config;
 	for (i = 0; i < ARRAY_SIZE(ctx->supplies); i++)
 		ctx->supplies[i].supply = regulator_names[i];
 

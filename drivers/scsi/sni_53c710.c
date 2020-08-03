@@ -28,7 +28,6 @@
 #include <linux/platform_device.h>
 
 #include <asm/page.h>
-#include <asm/pgtable.h>
 #include <asm/irq.h>
 #include <asm/delay.h>
 
@@ -71,7 +70,7 @@ static int snirm710_probe(struct platform_device *dev)
 
 	hostdata->dev = &dev->dev;
 	dma_set_mask(&dev->dev, DMA_BIT_MASK(32));
-	hostdata->base = ioremap_nocache(base, 0x100);
+	hostdata->base = ioremap(base, 0x100);
 	hostdata->differential = 0;
 
 	hostdata->clock = SNIRM710_CLOCK;

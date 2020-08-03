@@ -2,6 +2,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include "gem/i915_gem_mman.h"
 #include "gt/intel_engine_user.h"
 
 #include "i915_drv.h"
@@ -152,7 +153,7 @@ int i915_getparam_ioctl(struct drm_device *dev, void *data,
 			return -ENODEV;
 		break;
 	case I915_PARAM_CS_TIMESTAMP_FREQUENCY:
-		value = 1000 * RUNTIME_INFO(i915)->cs_timestamp_frequency_khz;
+		value = RUNTIME_INFO(i915)->cs_timestamp_frequency_hz;
 		break;
 	case I915_PARAM_MMAP_GTT_COHERENT:
 		value = INTEL_INFO(i915)->has_coherent_ggtt;

@@ -36,7 +36,8 @@
     defined(CONFIG_ARCH_TEGRA_124_SOC) || \
     defined(CONFIG_ARCH_TEGRA_132_SOC) || \
     defined(CONFIG_ARCH_TEGRA_210_SOC) || \
-    defined(CONFIG_ARCH_TEGRA_186_SOC)
+    defined(CONFIG_ARCH_TEGRA_186_SOC) || \
+    defined(CONFIG_ARCH_TEGRA_194_SOC)
 static u32 tegra30_fuse_read_early(struct tegra_fuse *fuse, unsigned int offset)
 {
 	if (WARN_ON(!fuse->base))
@@ -110,6 +111,7 @@ const struct tegra_fuse_soc tegra30_fuse_soc = {
 	.init = tegra30_fuse_init,
 	.speedo_init = tegra30_init_speedo_data,
 	.info = &tegra30_fuse_info,
+	.soc_attr_group = &tegra_soc_attr_group,
 };
 #endif
 
@@ -124,6 +126,7 @@ const struct tegra_fuse_soc tegra114_fuse_soc = {
 	.init = tegra30_fuse_init,
 	.speedo_init = tegra114_init_speedo_data,
 	.info = &tegra114_fuse_info,
+	.soc_attr_group = &tegra_soc_attr_group,
 };
 #endif
 
@@ -204,6 +207,7 @@ const struct tegra_fuse_soc tegra124_fuse_soc = {
 	.info = &tegra124_fuse_info,
 	.lookups = tegra124_fuse_lookups,
 	.num_lookups = ARRAY_SIZE(tegra124_fuse_lookups),
+	.soc_attr_group = &tegra_soc_attr_group,
 };
 #endif
 
@@ -289,6 +293,7 @@ const struct tegra_fuse_soc tegra210_fuse_soc = {
 	.info = &tegra210_fuse_info,
 	.lookups = tegra210_fuse_lookups,
 	.num_lookups = ARRAY_SIZE(tegra210_fuse_lookups),
+	.soc_attr_group = &tegra_soc_attr_group,
 };
 #endif
 
@@ -318,5 +323,36 @@ const struct tegra_fuse_soc tegra186_fuse_soc = {
 	.info = &tegra186_fuse_info,
 	.lookups = tegra186_fuse_lookups,
 	.num_lookups = ARRAY_SIZE(tegra186_fuse_lookups),
+	.soc_attr_group = &tegra_soc_attr_group,
+};
+#endif
+
+#if defined(CONFIG_ARCH_TEGRA_194_SOC)
+static const struct nvmem_cell_lookup tegra194_fuse_lookups[] = {
+	{
+		.nvmem_name = "fuse",
+		.cell_name = "xusb-pad-calibration",
+		.dev_id = "3520000.padctl",
+		.con_id = "calibration",
+	}, {
+		.nvmem_name = "fuse",
+		.cell_name = "xusb-pad-calibration-ext",
+		.dev_id = "3520000.padctl",
+		.con_id = "calibration-ext",
+	},
+};
+
+static const struct tegra_fuse_info tegra194_fuse_info = {
+	.read = tegra30_fuse_read,
+	.size = 0x300,
+	.spare = 0x280,
+};
+
+const struct tegra_fuse_soc tegra194_fuse_soc = {
+	.init = tegra30_fuse_init,
+	.info = &tegra194_fuse_info,
+	.lookups = tegra194_fuse_lookups,
+	.num_lookups = ARRAY_SIZE(tegra194_fuse_lookups),
+	.soc_attr_group = &tegra194_soc_attr_group,
 };
 #endif

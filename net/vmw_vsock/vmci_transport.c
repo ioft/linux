@@ -648,7 +648,7 @@ static int vmci_transport_recv_dgram_cb(void *data, struct vmci_datagram *dg)
 static bool vmci_transport_stream_allow(u32 cid, u32 port)
 {
 	static const u32 non_socket_contexts[] = {
-		VMADDR_CID_RESERVED,
+		VMADDR_CID_LOCAL,
 	};
 	int i;
 
@@ -2055,7 +2055,7 @@ static bool vmci_check_transport(struct vsock_sock *vsk)
 	return vsk->transport == &vmci_transport;
 }
 
-void vmci_vsock_transport_cb(bool is_host)
+static void vmci_vsock_transport_cb(bool is_host)
 {
 	int features;
 

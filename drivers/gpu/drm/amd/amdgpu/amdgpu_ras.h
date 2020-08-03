@@ -334,6 +334,8 @@ struct amdgpu_ras {
 	uint32_t flags;
 	bool reboot;
 	struct amdgpu_ras_eeprom_control eeprom_control;
+
+	bool error_query_ready;
 };
 
 struct ras_fs_data {
@@ -494,8 +496,7 @@ int amdgpu_ras_add_bad_pages(struct amdgpu_device *adev,
 
 int amdgpu_ras_reserve_bad_pages(struct amdgpu_device *adev);
 
-static inline int amdgpu_ras_reset_gpu(struct amdgpu_device *adev,
-		bool is_baco)
+static inline int amdgpu_ras_reset_gpu(struct amdgpu_device *adev)
 {
 	struct amdgpu_ras *ras = amdgpu_ras_get_context(adev);
 
@@ -593,6 +594,8 @@ int amdgpu_ras_sysfs_remove(struct amdgpu_device *adev,
 void amdgpu_ras_debugfs_create(struct amdgpu_device *adev,
 		struct ras_fs_if *head);
 
+void amdgpu_ras_debugfs_create_all(struct amdgpu_device *adev);
+
 void amdgpu_ras_debugfs_remove(struct amdgpu_device *adev,
 		struct ras_common_if *head);
 
@@ -611,6 +614,9 @@ int amdgpu_ras_interrupt_remove_handler(struct amdgpu_device *adev,
 int amdgpu_ras_interrupt_dispatch(struct amdgpu_device *adev,
 		struct ras_dispatch_if *info);
 
+struct ras_manager *amdgpu_ras_find_obj(struct amdgpu_device *adev,
+		struct ras_common_if *head);
+
 extern atomic_t amdgpu_ras_in_intr;
 
 static inline bool amdgpu_ras_intr_triggered(void)
@@ -618,6 +624,13 @@ static inline bool amdgpu_ras_intr_triggered(void)
 	return !!atomic_read(&amdgpu_ras_in_intr);
 }
 
+static inline void amdgpu_ras_intr_cleared(void)
+{
+	atomic_set(&amdgpu_ras_in_intr, 0);
+}
+
 void amdgpu_ras_global_ras_isr(struct amdgpu_device *adev);
+
+void amdgpu_ras_set_error_query_ready(struct amdgpu_device *adev, bool ready);
 
 #endif

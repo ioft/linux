@@ -6,6 +6,7 @@
 
 #include <drm/drm_atomic_helper.h>
 #include <drm/drm_panel.h>
+#include <drm/drm_simple_kms_helper.h>
 
 #include "drm.h"
 #include "dc.h"
@@ -23,7 +24,7 @@ int tegra_output_connector_get_modes(struct drm_connector *connector)
 	 * ignore any other means of obtaining a mode.
 	 */
 	if (output->panel) {
-		err = output->panel->funcs->get_modes(output->panel);
+		err = drm_panel_get_modes(output->panel, connector);
 		if (err > 0)
 			return err;
 	}
@@ -77,11 +78,6 @@ void tegra_output_connector_destroy(struct drm_connector *connector)
 
 	drm_connector_unregister(connector);
 	drm_connector_cleanup(connector);
-}
-
-void tegra_output_encoder_destroy(struct drm_encoder *encoder)
-{
-	drm_encoder_cleanup(encoder);
 }
 
 static irqreturn_t hpd_irq(int irq, void *data)
@@ -249,4 +245,20 @@ void tegra_output_find_possible_crtcs(struct tegra_output *output,
 	}
 
 	output->encoder.possible_crtcs = mask;
+}
+
+int tegra_output_suspend(struct tegra_output *output)
+{
+	if (output->hpd_irq)
+		disable_irq(output->hpd_irq);
+
+	return 0;
+}
+
+int tegra_output_resume(struct tegra_output *output)
+{
+	if (output->hpd_irq)
+		enable_irq(output->hpd_irq);
+
+	return 0;
 }

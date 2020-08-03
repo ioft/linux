@@ -7,7 +7,7 @@
  *
  * Core file which registers crypto algorithms supported by the CryptoEngine.
  *
- * You could find a link for the datasheet in Documentation/arm/sunxi/README
+ * You could find a link for the datasheet in Documentation/arm/sunxi.rst
  */
 #include <linux/clk.h>
 #include <linux/crypto.h>
@@ -555,7 +555,7 @@ static int sun8i_ce_probe(struct platform_device *pdev)
 		return -EINVAL;
 	}
 
-	ce->base = devm_platform_ioremap_resource(pdev, 0);;
+	ce->base = devm_platform_ioremap_resource(pdev, 0);
 	if (IS_ERR(ce->base))
 		return PTR_ERR(ce->base);
 
@@ -565,10 +565,8 @@ static int sun8i_ce_probe(struct platform_device *pdev)
 
 	/* Get Non Secure IRQ */
 	irq = platform_get_irq(pdev, 0);
-	if (irq < 0) {
-		dev_err(ce->dev, "Cannot get CryptoEngine Non-secure IRQ\n");
+	if (irq < 0)
 		return irq;
-	}
 
 	ce->reset = devm_reset_control_get(&pdev->dev, NULL);
 	if (IS_ERR(ce->reset)) {
@@ -624,7 +622,7 @@ error_alg:
 error_irq:
 	sun8i_ce_pm_exit(ce);
 error_pm:
-	sun8i_ce_free_chanlist(ce, MAXFLOW);
+	sun8i_ce_free_chanlist(ce, MAXFLOW - 1);
 	return err;
 }
 
@@ -638,7 +636,7 @@ static int sun8i_ce_remove(struct platform_device *pdev)
 	debugfs_remove_recursive(ce->dbgfs_dir);
 #endif
 
-	sun8i_ce_free_chanlist(ce, MAXFLOW);
+	sun8i_ce_free_chanlist(ce, MAXFLOW - 1);
 
 	sun8i_ce_pm_exit(ce);
 	return 0;

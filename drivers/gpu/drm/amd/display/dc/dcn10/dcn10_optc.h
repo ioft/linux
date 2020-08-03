@@ -158,6 +158,7 @@ struct dcn_optc_registers {
 	uint32_t OTG_GSL_WINDOW_Y;
 	uint32_t OTG_VUPDATE_KEEPOUT;
 	uint32_t OTG_CRC_CNTL;
+	uint32_t OTG_CRC_CNTL2;
 	uint32_t OTG_CRC0_DATA_RG;
 	uint32_t OTG_CRC0_DATA_B;
 	uint32_t OTG_CRC0_WINDOWA_X_CONTROL;
@@ -165,13 +166,11 @@ struct dcn_optc_registers {
 	uint32_t OTG_CRC0_WINDOWB_X_CONTROL;
 	uint32_t OTG_CRC0_WINDOWB_Y_CONTROL;
 	uint32_t GSL_SOURCE_SELECT;
-#ifdef CONFIG_DRM_AMD_DC_DCN2_0
 	uint32_t DWB_SOURCE_SELECT;
 	uint32_t OTG_DSC_START_POSITION;
 	uint32_t OPTC_DATA_FORMAT_CONTROL;
 	uint32_t OPTC_BYTES_PER_PIXEL;
 	uint32_t OPTC_WIDTH_CONTROL;
-#endif
 };
 
 #define TG_COMMON_MASK_SH_LIST_DCN(mask_sh)\
@@ -187,6 +186,7 @@ struct dcn_optc_registers {
 	SF(OTG0_OTG_GLOBAL_CONTROL0, OTG_MASTER_UPDATE_LOCK_SEL, mask_sh),\
 	SF(OTG0_OTG_DOUBLE_BUFFER_CONTROL, OTG_UPDATE_PENDING, mask_sh),\
 	SF(OTG0_OTG_DOUBLE_BUFFER_CONTROL, OTG_BLANK_DATA_DOUBLE_BUFFER_EN, mask_sh),\
+	SF(OTG0_OTG_DOUBLE_BUFFER_CONTROL, OTG_RANGE_TIMING_DBUF_UPDATE_MODE, mask_sh),\
 	SF(OTG0_OTG_H_TOTAL, OTG_H_TOTAL, mask_sh),\
 	SF(OTG0_OTG_H_BLANK_START_END, OTG_H_BLANK_START, mask_sh),\
 	SF(OTG0_OTG_H_BLANK_START_END, OTG_H_BLANK_END, mask_sh),\
@@ -456,7 +456,6 @@ struct dcn_optc_registers {
 	type MANUAL_FLOW_CONTROL;\
 	type MANUAL_FLOW_CONTROL_SEL;
 
-#ifdef CONFIG_DRM_AMD_DC_DCN2_0
 
 #define TG_REG_FIELD_LIST(type) \
 	TG_REG_FIELD_LIST_DCN1_0(type)\
@@ -477,14 +476,12 @@ struct dcn_optc_registers {
 	type OPTC_DSC_SLICE_WIDTH;\
 	type OPTC_SEGMENT_WIDTH;\
 	type OPTC_DWB0_SOURCE_SELECT;\
-	type OPTC_DWB1_SOURCE_SELECT;
+	type OPTC_DWB1_SOURCE_SELECT;\
+	type OTG_CRC_DSC_MODE;\
+	type OTG_CRC_DATA_STREAM_COMBINE_MODE;\
+	type OTG_CRC_DATA_STREAM_SPLIT_MODE;\
+	type OTG_CRC_DATA_FORMAT;
 
-#else
-
-#define TG_REG_FIELD_LIST(type) \
-	TG_REG_FIELD_LIST_DCN1_0(type)
-
-#endif
 
 
 struct dcn_optc_shift {
@@ -542,6 +539,7 @@ struct dcn_otg_state {
 	uint32_t h_total;
 	uint32_t underflow_occurred_status;
 	uint32_t otg_enabled;
+	uint32_t blank_enabled;
 };
 
 void optc1_read_otg_state(struct optc *optc1,
@@ -633,7 +631,8 @@ void optc1_set_drr(
 
 void optc1_set_static_screen_control(
 	struct timing_generator *optc,
-	uint32_t value);
+	uint32_t event_triggers,
+	uint32_t num_frames);
 
 void optc1_program_stereo(struct timing_generator *optc,
 	const struct dc_crtc_timing *timing, struct crtc_stereo_flags *flags);
@@ -649,6 +648,8 @@ bool optc1_is_tg_enabled(struct timing_generator *optc);
 bool optc1_is_optc_underflow_occurred(struct timing_generator *optc);
 
 void optc1_set_blank_data_double_buffer(struct timing_generator *optc, bool enable);
+
+void optc1_set_timing_double_buffer(struct timing_generator *optc, bool enable);
 
 bool optc1_get_otg_active_size(struct timing_generator *optc,
 		uint32_t *otg_active_width,

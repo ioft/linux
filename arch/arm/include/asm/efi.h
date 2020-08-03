@@ -13,7 +13,6 @@
 #include <asm/highmem.h>
 #include <asm/mach/map.h>
 #include <asm/mmu_context.h>
-#include <asm/pgtable.h>
 #include <asm/ptrace.h>
 
 #ifdef CONFIG_EFI
@@ -50,19 +49,8 @@ void efi_virtmap_unload(void);
 
 /* arch specific definitions used by the stub code */
 
-#define efi_call_early(f, ...)		sys_table_arg->boottime->f(__VA_ARGS__)
-#define __efi_call_early(f, ...)	f(__VA_ARGS__)
-#define efi_call_runtime(f, ...)	sys_table_arg->runtime->f(__VA_ARGS__)
-#define efi_is_64bit()			(false)
-
-#define efi_table_attr(table, attr, instance)				\
-	((table##_t *)instance)->attr
-
-#define efi_call_proto(protocol, f, instance, ...)			\
-	((protocol##_t *)instance)->f(instance, ##__VA_ARGS__)
-
-struct screen_info *alloc_screen_info(efi_system_table_t *sys_table_arg);
-void free_screen_info(efi_system_table_t *sys_table, struct screen_info *si);
+struct screen_info *alloc_screen_info(void);
+void free_screen_info(struct screen_info *si);
 
 static inline void efifb_setup_from_dmi(struct screen_info *si, const char *opt)
 {
@@ -98,5 +86,12 @@ static inline unsigned long efi_get_max_initrd_addr(unsigned long dram_base,
 {
 	return dram_base + SZ_512M;
 }
+
+struct efi_arm_entry_state {
+	u32	cpsr_before_ebs;
+	u32	sctlr_before_ebs;
+	u32	cpsr_after_ebs;
+	u32	sctlr_after_ebs;
+};
 
 #endif /* _ASM_ARM_EFI_H */

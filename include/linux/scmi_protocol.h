@@ -4,6 +4,10 @@
  *
  * Copyright (C) 2018 ARM Ltd.
  */
+
+#ifndef _LINUX_SCMI_PROTOCOL_H
+#define _LINUX_SCMI_PROTOCOL_H
+
 #include <linux/device.h>
 #include <linux/types.h>
 
@@ -257,6 +261,7 @@ enum scmi_std_protocol {
 struct scmi_device {
 	u32 id;
 	u8 protocol_id;
+	const char *name;
 	struct device dev;
 	struct scmi_handle *handle;
 };
@@ -264,11 +269,13 @@ struct scmi_device {
 #define to_scmi_dev(d) container_of(d, struct scmi_device, dev)
 
 struct scmi_device *
-scmi_device_create(struct device_node *np, struct device *parent, int protocol);
+scmi_device_create(struct device_node *np, struct device *parent, int protocol,
+		   const char *name);
 void scmi_device_destroy(struct scmi_device *scmi_dev);
 
 struct scmi_device_id {
 	u8 protocol_id;
+	const char *name;
 };
 
 struct scmi_driver {
@@ -316,3 +323,5 @@ static inline void scmi_driver_unregister(struct scmi_driver *driver) {}
 typedef int (*scmi_prot_init_fn_t)(struct scmi_handle *);
 int scmi_protocol_register(int protocol_id, scmi_prot_init_fn_t fn);
 void scmi_protocol_unregister(int protocol_id);
+
+#endif /* _LINUX_SCMI_PROTOCOL_H */

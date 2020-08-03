@@ -30,7 +30,6 @@
 #include "tilcdc_external.h"
 #include "tilcdc_panel.h"
 #include "tilcdc_regs.h"
-#include "tilcdc_tfp410.h"
 
 static LIST_HEAD(module_list);
 
@@ -63,12 +62,6 @@ void tilcdc_module_cleanup(struct tilcdc_module *mod)
 }
 
 static struct of_device_id tilcdc_of_match[];
-
-static struct drm_framebuffer *tilcdc_fb_create(struct drm_device *dev,
-		struct drm_file *file_priv, const struct drm_mode_fb_cmd2 *mode_cmd)
-{
-	return drm_gem_fb_create(dev, file_priv, mode_cmd);
-}
 
 static int tilcdc_atomic_check(struct drm_device *dev,
 			       struct drm_atomic_state *state)
@@ -140,7 +133,7 @@ static int tilcdc_commit(struct drm_device *dev,
 }
 
 static const struct drm_mode_config_funcs mode_config_funcs = {
-	.fb_create = tilcdc_fb_create,
+	.fb_create = drm_gem_fb_create,
 	.atomic_check = tilcdc_atomic_check,
 	.atomic_commit = tilcdc_commit,
 };
@@ -256,7 +249,7 @@ static int tilcdc_init(struct drm_driver *ddrv, struct device *dev)
 		goto init_failed;
 	}
 
-	priv->mmio = ioremap_nocache(res->start, resource_size(res));
+	priv->mmio = ioremap(res->start, resource_size(res));
 	if (!priv->mmio) {
 		dev_err(dev, "failed to ioremap\n");
 		ret = -ENOMEM;
@@ -397,10 +390,9 @@ static int tilcdc_init(struct drm_driver *ddrv, struct device *dev)
 	ret = drm_dev_register(ddev, 0);
 	if (ret)
 		goto init_failed;
+	priv->is_registered = true;
 
 	drm_fbdev_generic_setup(ddev, bpp);
-
-	priv->is_registered = true;
 	return 0;
 
 init_failed:
@@ -485,26 +477,17 @@ static struct drm_info_list tilcdc_debugfs_list[] = {
 		{ "mm",   tilcdc_mm_show,   0 },
 };
 
-static int tilcdc_debugfs_init(struct drm_minor *minor)
+static void tilcdc_debugfs_init(struct drm_minor *minor)
 {
-	struct drm_device *dev = minor->dev;
 	struct tilcdc_module *mod;
-	int ret;
 
-	ret = drm_debugfs_create_files(tilcdc_debugfs_list,
-			ARRAY_SIZE(tilcdc_debugfs_list),
-			minor->debugfs_root, minor);
+	drm_debugfs_create_files(tilcdc_debugfs_list,
+				 ARRAY_SIZE(tilcdc_debugfs_list),
+				 minor->debugfs_root, minor);
 
 	list_for_each_entry(mod, &module_list, list)
 		if (mod->funcs->debugfs_init)
 			mod->funcs->debugfs_init(mod, minor);
-
-	if (ret) {
-		dev_err(dev->dev, "could not install tilcdc_debugfs_list\n");
-		return ret;
-	}
-
-	return ret;
 }
 #endif
 
@@ -649,7 +632,6 @@ static struct platform_driver tilcdc_platform_driver = {
 static int __init tilcdc_drm_init(void)
 {
 	DBG("init");
-	tilcdc_tfp410_init();
 	tilcdc_panel_init();
 	return platform_driver_register(&tilcdc_platform_driver);
 }
@@ -659,7 +641,6 @@ static void __exit tilcdc_drm_fini(void)
 	DBG("fini");
 	platform_driver_unregister(&tilcdc_platform_driver);
 	tilcdc_panel_fini();
-	tilcdc_tfp410_fini();
 }
 
 module_init(tilcdc_drm_init);

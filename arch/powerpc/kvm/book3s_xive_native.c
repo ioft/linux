@@ -31,6 +31,12 @@ static u8 xive_vm_esb_load(struct xive_irq_data *xd, u32 offset)
 {
 	u64 val;
 
+	/*
+	 * The KVM XIVE native device does not use the XIVE_ESB_SET_PQ_10
+	 * load operation, so there is no need to enforce load-after-store
+	 * ordering.
+	 */
+
 	if (xd->flags & XIVE_IRQ_FLAG_SHIFT_BUG)
 		offset |= offset << 4;
 
@@ -631,7 +637,7 @@ static int kvmppc_xive_native_set_queue_config(struct kvmppc_xive *xive,
 	srcu_idx = srcu_read_lock(&kvm->srcu);
 	gfn = gpa_to_gfn(kvm_eq.qaddr);
 
-	page_size = kvm_host_page_size(kvm, gfn);
+	page_size = kvm_host_page_size(vcpu, gfn);
 	if (1ull << kvm_eq.qshift > page_size) {
 		srcu_read_unlock(&kvm->srcu, srcu_idx);
 		pr_warn("Incompatible host page size %lx!\n", page_size);

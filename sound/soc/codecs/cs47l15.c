@@ -438,11 +438,13 @@ static const struct snd_kcontrol_new cs47l15_aec_loopback_mux[] = {
 static const struct snd_soc_dapm_widget cs47l15_dapm_widgets[] = {
 SND_SOC_DAPM_SUPPLY("SYSCLK", MADERA_SYSTEM_CLOCK_1, MADERA_SYSCLK_ENA_SHIFT,
 		    0, madera_sysclk_ev,
-		    SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_PRE_PMD),
+		    SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMU |
+		    SND_SOC_DAPM_PRE_PMD | SND_SOC_DAPM_POST_PMD),
 SND_SOC_DAPM_SUPPLY("OPCLK", MADERA_OUTPUT_SYSTEM_CLOCK,
 		    MADERA_OPCLK_ENA_SHIFT, 0, NULL, 0),
-SND_SOC_DAPM_SUPPLY("DSPCLK", MADERA_DSP_CLOCK_1,
-		    MADERA_DSP_CLK_ENA_SHIFT, 0, NULL, 0),
+SND_SOC_DAPM_SUPPLY("DSPCLK", MADERA_DSP_CLOCK_1, MADERA_DSP_CLK_ENA_SHIFT,
+		    0, madera_clk_ev,
+		    SND_SOC_DAPM_PRE_PMU | SND_SOC_DAPM_POST_PMD),
 
 SND_SOC_DAPM_REGULATOR_SUPPLY("CPVDD1", 20, 0),
 SND_SOC_DAPM_REGULATOR_SUPPLY("MICVDD", 0, SND_SOC_DAPM_REGULATOR_BYPASS),
@@ -529,6 +531,7 @@ SND_SOC_DAPM_OUTPUT("DRC2 Signal Activity"),
 SND_SOC_DAPM_OUTPUT("DSP Trigger Out"),
 
 SND_SOC_DAPM_DEMUX("HPOUT1 Demux", SND_SOC_NOPM, 0, 0, &cs47l15_outdemux),
+SND_SOC_DAPM_MUX("HPOUT1 Mono Mux", SND_SOC_NOPM, 0, 0, &cs47l15_outdemux),
 
 SND_SOC_DAPM_PGA("PWM1 Driver", MADERA_PWM_DRIVE_1, MADERA_PWM1_ENA_SHIFT,
 		 0, NULL, 0),
@@ -1084,6 +1087,9 @@ static const struct snd_soc_dapm_route cs47l15_dapm_routes[] = {
 	{ "AEC2 Loopback", "HPOUT1R", "OUT1R" },
 	{ "HPOUT1 Demux", NULL, "OUT1L" },
 	{ "HPOUT1 Demux", NULL, "OUT1R" },
+
+	{ "OUT1R", NULL, "HPOUT1 Mono Mux" },
+
 	{ "HPOUTL", "HPOUT", "HPOUT1 Demux" },
 	{ "HPOUTR", "HPOUT", "HPOUT1 Demux" },
 	{ "EPOUTP", "EPOUT", "HPOUT1 Demux" },
@@ -1223,22 +1229,21 @@ static struct snd_soc_dai_driver cs47l15_dai[] = {
 	},
 };
 
-static int cs47l15_open(struct snd_compr_stream *stream)
+static int cs47l15_open(struct snd_soc_component *component,
+			struct snd_compr_stream *stream)
 {
 	struct snd_soc_pcm_runtime *rtd = stream->private_data;
-	struct snd_soc_component *component =
-		snd_soc_rtdcom_lookup(rtd, DRV_NAME);
 	struct cs47l15 *cs47l15 = snd_soc_component_get_drvdata(component);
 	struct madera_priv *priv = &cs47l15->core;
 	struct madera *madera = priv->madera;
 	int n_adsp;
 
-	if (strcmp(rtd->codec_dai->name, "cs47l15-dsp-trace") == 0) {
+	if (strcmp(asoc_rtd_to_codec(rtd, 0)->name, "cs47l15-dsp-trace") == 0) {
 		n_adsp = 0;
 	} else {
 		dev_err(madera->dev,
 			"No suitable compressed stream for DAI '%s'\n",
-			rtd->codec_dai->name);
+			asoc_rtd_to_codec(rtd, 0)->name);
 		return -EINVAL;
 	}
 
@@ -1261,6 +1266,11 @@ static irqreturn_t cs47l15_adsp2_irq(int irq, void *data)
 	return IRQ_HANDLED;
 }
 
+static const struct snd_soc_dapm_route cs47l15_mono_routes[] = {
+	{ "HPOUT1 Mono Mux", "HPOUT", "OUT1L" },
+	{ "HPOUT1 Mono Mux", "EPOUT", "OUT1L" },
+};
+
 static int cs47l15_component_probe(struct snd_soc_component *component)
 {
 	struct cs47l15 *cs47l15 = snd_soc_component_get_drvdata(component);
@@ -1277,7 +1287,9 @@ static int cs47l15_component_probe(struct snd_soc_component *component)
 	if (ret)
 		return ret;
 
-	ret = madera_init_outputs(component, CS47L15_MONO_OUTPUTS);
+	ret = madera_init_outputs(component, cs47l15_mono_routes,
+				  ARRAY_SIZE(cs47l15_mono_routes),
+				  CS47L15_MONO_OUTPUTS);
 	if (ret)
 		return ret;
 
@@ -1316,7 +1328,7 @@ static unsigned int cs47l15_digital_vu[] = {
 	MADERA_DAC_DIGITAL_VOLUME_5R,
 };
 
-static const struct snd_compr_ops cs47l15_compr_ops = {
+static const struct snd_compress_ops cs47l15_compress_ops = {
 	.open = &cs47l15_open,
 	.free = &wm_adsp_compr_free,
 	.set_params = &wm_adsp_compr_set_params,
@@ -1332,7 +1344,7 @@ static const struct snd_soc_component_driver soc_component_dev_cs47l15 = {
 	.set_sysclk		= &madera_set_sysclk,
 	.set_pll		= &cs47l15_set_fll,
 	.name			= DRV_NAME,
-	.compr_ops		= &cs47l15_compr_ops,
+	.compress_ops		= &cs47l15_compress_ops,
 	.controls		= cs47l15_snd_controls,
 	.num_controls		= ARRAY_SIZE(cs47l15_snd_controls),
 	.dapm_widgets		= cs47l15_dapm_widgets,

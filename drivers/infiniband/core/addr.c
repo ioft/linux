@@ -139,7 +139,7 @@ int ib_nl_handle_ip_res_resp(struct sk_buff *skb,
 	if (ib_nl_is_good_ip_resp(nlh))
 		ib_nl_process_good_ip_rsep(nlh);
 
-	return skb->len;
+	return 0;
 }
 
 static int ib_nl_ip_send_msg(struct rdma_dev_addr *dev_addr,
@@ -370,6 +370,8 @@ static int fetch_ha(const struct dst_entry *dst, struct rdma_dev_addr *dev_addr,
 		(const void *)&dst_in4->sin_addr.s_addr :
 		(const void *)&dst_in6->sin6_addr;
 	sa_family_t family = dst_in->sa_family;
+
+	might_sleep();
 
 	/* If we have a gateway in IB mode then it must be an IB network */
 	if (has_gateway(dst, family) && dev_addr->network == RDMA_NETWORK_IB)
@@ -726,6 +728,8 @@ int roce_resolve_route_from_path(struct sa_path_rec *rec,
 	} sgid, dgid;
 	struct rdma_dev_addr dev_addr = {};
 	int ret;
+
+	might_sleep();
 
 	if (rec->roce.route_resolved)
 		return 0;

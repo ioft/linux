@@ -5,10 +5,11 @@
 #include <linux/list.h>
 #include <linux/spinlock.h>
 #include <linux/mm_types.h>
+#include <linux/mmap_lock.h>
 #include <linux/srcu.h>
 #include <linux/interval_tree.h>
 
-struct mmu_notifier_mm;
+struct mmu_notifier_subscriptions;
 struct mmu_notifier;
 struct mmu_notifier_range;
 struct mmu_interval_notifier;
@@ -73,7 +74,7 @@ struct mmu_notifier_ops {
 	 * through the gart alias address, so leading to memory
 	 * corruption.
 	 */
-	void (*release)(struct mmu_notifier *mn,
+	void (*release)(struct mmu_notifier *subscription,
 			struct mm_struct *mm);
 
 	/*
@@ -85,7 +86,7 @@ struct mmu_notifier_ops {
 	 * Start-end is necessary in case the secondary MMU is mapping the page
 	 * at a smaller granularity than the primary MMU.
 	 */
-	int (*clear_flush_young)(struct mmu_notifier *mn,
+	int (*clear_flush_young)(struct mmu_notifier *subscription,
 				 struct mm_struct *mm,
 				 unsigned long start,
 				 unsigned long end);
@@ -95,7 +96,7 @@ struct mmu_notifier_ops {
 	 * latter, it is supposed to test-and-clear the young/accessed bitflag
 	 * in the secondary pte, but it may omit flushing the secondary tlb.
 	 */
-	int (*clear_young)(struct mmu_notifier *mn,
+	int (*clear_young)(struct mmu_notifier *subscription,
 			   struct mm_struct *mm,
 			   unsigned long start,
 			   unsigned long end);
@@ -106,7 +107,7 @@ struct mmu_notifier_ops {
 	 * frequently used without actually clearing the flag or tearing
 	 * down the secondary mapping on the page.
 	 */
-	int (*test_young)(struct mmu_notifier *mn,
+	int (*test_young)(struct mmu_notifier *subscription,
 			  struct mm_struct *mm,
 			  unsigned long address);
 
@@ -114,14 +115,14 @@ struct mmu_notifier_ops {
 	 * change_pte is called in cases that pte mapping to page is changed:
 	 * for example, when ksm remaps pte to point to a new shared page.
 	 */
-	void (*change_pte)(struct mmu_notifier *mn,
+	void (*change_pte)(struct mmu_notifier *subscription,
 			   struct mm_struct *mm,
 			   unsigned long address,
 			   pte_t pte);
 
 	/*
 	 * invalidate_range_start() and invalidate_range_end() must be
-	 * paired and are called only when the mmap_sem and/or the
+	 * paired and are called only when the mmap_lock and/or the
 	 * locks protecting the reverse maps are held. If the subsystem
 	 * can't guarantee that no additional references are taken to
 	 * the pages in the range, it has to implement the
@@ -169,9 +170,9 @@ struct mmu_notifier_ops {
 	 * invalidate_range_end.
 	 *
 	 */
-	int (*invalidate_range_start)(struct mmu_notifier *mn,
+	int (*invalidate_range_start)(struct mmu_notifier *subscription,
 				      const struct mmu_notifier_range *range);
-	void (*invalidate_range_end)(struct mmu_notifier *mn,
+	void (*invalidate_range_end)(struct mmu_notifier *subscription,
 				     const struct mmu_notifier_range *range);
 
 	/*
@@ -192,8 +193,10 @@ struct mmu_notifier_ops {
 	 * of what was passed to invalidate_range_start()/end(), if
 	 * called between those functions.
 	 */
-	void (*invalidate_range)(struct mmu_notifier *mn, struct mm_struct *mm,
-				 unsigned long start, unsigned long end);
+	void (*invalidate_range)(struct mmu_notifier *subscription,
+				 struct mm_struct *mm,
+				 unsigned long start,
+				 unsigned long end);
 
 	/*
 	 * These callbacks are used with the get/put interface to manage the
@@ -206,17 +209,17 @@ struct mmu_notifier_ops {
 	 * and cannot sleep.
 	 */
 	struct mmu_notifier *(*alloc_notifier)(struct mm_struct *mm);
-	void (*free_notifier)(struct mmu_notifier *mn);
+	void (*free_notifier)(struct mmu_notifier *subscription);
 };
 
 /*
- * The notifier chains are protected by mmap_sem and/or the reverse map
+ * The notifier chains are protected by mmap_lock and/or the reverse map
  * semaphores. Notifier chains are only changed when all reverse maps and
- * the mmap_sem locks are taken.
+ * the mmap_lock locks are taken.
  *
  * Therefore notifier chains can only be traversed when either
  *
- * 1. mmap_sem is held.
+ * 1. mmap_lock is held.
  * 2. One of the reverse map locks is held (i_mmap_rwsem or anon_vma->rwsem).
  * 3. No other concurrent thread can access the list (release)
  */
@@ -235,7 +238,7 @@ struct mmu_notifier {
  *              was required but mmu_notifier_range_blockable(range) is false.
  */
 struct mmu_interval_notifier_ops {
-	bool (*invalidate)(struct mmu_interval_notifier *mni,
+	bool (*invalidate)(struct mmu_interval_notifier *interval_sub,
 			   const struct mmu_notifier_range *range,
 			   unsigned long cur_seq);
 };
@@ -265,7 +268,7 @@ struct mmu_notifier_range {
 
 static inline int mm_has_notifiers(struct mm_struct *mm)
 {
-	return unlikely(mm->mmu_notifier_mm);
+	return unlikely(mm->notifier_subscriptions);
 }
 
 struct mmu_notifier *mmu_notifier_get_locked(const struct mmu_notifier_ops *ops,
@@ -275,35 +278,36 @@ mmu_notifier_get(const struct mmu_notifier_ops *ops, struct mm_struct *mm)
 {
 	struct mmu_notifier *ret;
 
-	down_write(&mm->mmap_sem);
+	mmap_write_lock(mm);
 	ret = mmu_notifier_get_locked(ops, mm);
-	up_write(&mm->mmap_sem);
+	mmap_write_unlock(mm);
 	return ret;
 }
-void mmu_notifier_put(struct mmu_notifier *mn);
+void mmu_notifier_put(struct mmu_notifier *subscription);
 void mmu_notifier_synchronize(void);
 
-extern int mmu_notifier_register(struct mmu_notifier *mn,
+extern int mmu_notifier_register(struct mmu_notifier *subscription,
 				 struct mm_struct *mm);
-extern int __mmu_notifier_register(struct mmu_notifier *mn,
+extern int __mmu_notifier_register(struct mmu_notifier *subscription,
 				   struct mm_struct *mm);
-extern void mmu_notifier_unregister(struct mmu_notifier *mn,
+extern void mmu_notifier_unregister(struct mmu_notifier *subscription,
 				    struct mm_struct *mm);
 
-unsigned long mmu_interval_read_begin(struct mmu_interval_notifier *mni);
-int mmu_interval_notifier_insert(struct mmu_interval_notifier *mni,
+unsigned long
+mmu_interval_read_begin(struct mmu_interval_notifier *interval_sub);
+int mmu_interval_notifier_insert(struct mmu_interval_notifier *interval_sub,
 				 struct mm_struct *mm, unsigned long start,
 				 unsigned long length,
 				 const struct mmu_interval_notifier_ops *ops);
 int mmu_interval_notifier_insert_locked(
-	struct mmu_interval_notifier *mni, struct mm_struct *mm,
+	struct mmu_interval_notifier *interval_sub, struct mm_struct *mm,
 	unsigned long start, unsigned long length,
 	const struct mmu_interval_notifier_ops *ops);
-void mmu_interval_notifier_remove(struct mmu_interval_notifier *mni);
+void mmu_interval_notifier_remove(struct mmu_interval_notifier *interval_sub);
 
 /**
  * mmu_interval_set_seq - Save the invalidation sequence
- * @mni - The mni passed to invalidate
+ * @interval_sub - The subscription passed to invalidate
  * @cur_seq - The cur_seq passed to the invalidate() callback
  *
  * This must be called unconditionally from the invalidate callback of a
@@ -314,15 +318,16 @@ void mmu_interval_notifier_remove(struct mmu_interval_notifier *mni);
  * If the caller does not call mmu_interval_read_begin() or
  * mmu_interval_read_retry() then this call is not required.
  */
-static inline void mmu_interval_set_seq(struct mmu_interval_notifier *mni,
-					unsigned long cur_seq)
+static inline void
+mmu_interval_set_seq(struct mmu_interval_notifier *interval_sub,
+		     unsigned long cur_seq)
 {
-	WRITE_ONCE(mni->invalidate_seq, cur_seq);
+	WRITE_ONCE(interval_sub->invalidate_seq, cur_seq);
 }
 
 /**
  * mmu_interval_read_retry - End a read side critical section against a VA range
- * mni: The range
+ * interval_sub: The subscription
  * seq: The return of the paired mmu_interval_read_begin()
  *
  * This MUST be called under a user provided lock that is also held
@@ -334,15 +339,16 @@ static inline void mmu_interval_set_seq(struct mmu_interval_notifier *mni,
  * Returns true if an invalidation collided with this critical section, and
  * the caller should retry.
  */
-static inline bool mmu_interval_read_retry(struct mmu_interval_notifier *mni,
-					   unsigned long seq)
+static inline bool
+mmu_interval_read_retry(struct mmu_interval_notifier *interval_sub,
+			unsigned long seq)
 {
-	return mni->invalidate_seq != seq;
+	return interval_sub->invalidate_seq != seq;
 }
 
 /**
  * mmu_interval_check_retry - Test if a collision has occurred
- * mni: The range
+ * interval_sub: The subscription
  * seq: The return of the matching mmu_interval_read_begin()
  *
  * This can be used in the critical section between mmu_interval_read_begin()
@@ -357,14 +363,15 @@ static inline bool mmu_interval_read_retry(struct mmu_interval_notifier *mni,
  * This call can be used as part of loops and other expensive operations to
  * expedite a retry.
  */
-static inline bool mmu_interval_check_retry(struct mmu_interval_notifier *mni,
-					    unsigned long seq)
+static inline bool
+mmu_interval_check_retry(struct mmu_interval_notifier *interval_sub,
+			 unsigned long seq)
 {
 	/* Pairs with the WRITE_ONCE in mmu_interval_set_seq() */
-	return READ_ONCE(mni->invalidate_seq) != seq;
+	return READ_ONCE(interval_sub->invalidate_seq) != seq;
 }
 
-extern void __mmu_notifier_mm_destroy(struct mm_struct *mm);
+extern void __mmu_notifier_subscriptions_destroy(struct mm_struct *mm);
 extern void __mmu_notifier_release(struct mm_struct *mm);
 extern int __mmu_notifier_clear_flush_young(struct mm_struct *mm,
 					  unsigned long start,
@@ -480,15 +487,15 @@ static inline void mmu_notifier_invalidate_range(struct mm_struct *mm,
 		__mmu_notifier_invalidate_range(mm, start, end);
 }
 
-static inline void mmu_notifier_mm_init(struct mm_struct *mm)
+static inline void mmu_notifier_subscriptions_init(struct mm_struct *mm)
 {
-	mm->mmu_notifier_mm = NULL;
+	mm->notifier_subscriptions = NULL;
 }
 
-static inline void mmu_notifier_mm_destroy(struct mm_struct *mm)
+static inline void mmu_notifier_subscriptions_destroy(struct mm_struct *mm)
 {
 	if (mm_has_notifiers(mm))
-		__mmu_notifier_mm_destroy(mm);
+		__mmu_notifier_subscriptions_destroy(mm);
 }
 
 
@@ -692,11 +699,11 @@ static inline void mmu_notifier_invalidate_range(struct mm_struct *mm,
 {
 }
 
-static inline void mmu_notifier_mm_init(struct mm_struct *mm)
+static inline void mmu_notifier_subscriptions_init(struct mm_struct *mm)
 {
 }
 
-static inline void mmu_notifier_mm_destroy(struct mm_struct *mm)
+static inline void mmu_notifier_subscriptions_destroy(struct mm_struct *mm)
 {
 }
 

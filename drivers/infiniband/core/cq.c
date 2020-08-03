@@ -7,6 +7,12 @@
 #include <linux/slab.h>
 #include <rdma/ib_verbs.h>
 
+#include "core_priv.h"
+
+#include <trace/events/rdma_core.h>
+/* Max size for shared CQ, may require tuning */
+#define IB_MAX_SHARED_CQ_SZ		4096U
+
 /* # of WCs to poll for with a single call to ib_poll_cq */
 #define IB_POLL_BATCH			16
 #define IB_POLL_BATCH_DIRECT		8
@@ -41,6 +47,7 @@ static void ib_cq_rdma_dim_work(struct work_struct *w)
 
 	dim->state = DIM_START_MEASURE;
 
+	trace_cq_modify(cq, comps, usec);
 	cq->device->ops.modify_cq(cq, comps, usec);
 }
 
@@ -65,18 +72,38 @@ static void rdma_dim_init(struct ib_cq *cq)
 	INIT_WORK(&dim->work, ib_cq_rdma_dim_work);
 }
 
+static void rdma_dim_destroy(struct ib_cq *cq)
+{
+	if (!cq->dim)
+		return;
+
+	cancel_work_sync(&cq->dim->work);
+	kfree(cq->dim);
+}
+
+static int __poll_cq(struct ib_cq *cq, int num_entries, struct ib_wc *wc)
+{
+	int rc;
+
+	rc = ib_poll_cq(cq, num_entries, wc);
+	trace_cq_poll(cq, num_entries, rc);
+	return rc;
+}
+
 static int __ib_process_cq(struct ib_cq *cq, int budget, struct ib_wc *wcs,
 			   int batch)
 {
 	int i, n, completed = 0;
+
+	trace_cq_process(cq);
 
 	/*
 	 * budget might be (-1) if the caller does not
 	 * want to bound this call, thus we need unsigned
 	 * minimum here.
 	 */
-	while ((n = ib_poll_cq(cq, min_t(u32, batch,
-					 budget - completed), wcs)) > 0) {
+	while ((n = __poll_cq(cq, min_t(u32, batch,
+					budget - completed), wcs)) > 0) {
 		for (i = 0; i < n; i++) {
 			struct ib_wc *wc = &wcs[i];
 
@@ -131,8 +158,10 @@ static int ib_poll_handler(struct irq_poll *iop, int budget)
 	completed = __ib_process_cq(cq, budget, cq->wc, IB_POLL_BATCH);
 	if (completed < budget) {
 		irq_poll_complete(&cq->iop);
-		if (ib_req_notify_cq(cq, IB_POLL_FLAGS) > 0)
+		if (ib_req_notify_cq(cq, IB_POLL_FLAGS) > 0) {
+			trace_cq_reschedule(cq);
 			irq_poll_sched(&cq->iop);
+		}
 	}
 
 	if (dim)
@@ -143,6 +172,7 @@ static int ib_poll_handler(struct irq_poll *iop, int budget)
 
 static void ib_cq_completion_softirq(struct ib_cq *cq, void *private)
 {
+	trace_cq_schedule(cq);
 	irq_poll_sched(&cq->iop);
 }
 
@@ -162,6 +192,7 @@ static void ib_cq_poll_work(struct work_struct *work)
 
 static void ib_cq_completion_workqueue(struct ib_cq *cq, void *private)
 {
+	trace_cq_schedule(cq);
 	queue_work(cq->comp_wq, &cq->work);
 }
 
@@ -200,6 +231,7 @@ struct ib_cq *__ib_alloc_cq_user(struct ib_device *dev, void *private,
 	cq->cq_context = private;
 	cq->poll_ctx = poll_ctx;
 	atomic_set(&cq->usecnt, 0);
+	cq->comp_vector = comp_vector;
 
 	cq->wc = kmalloc_array(IB_POLL_BATCH, sizeof(*cq->wc), GFP_KERNEL);
 	if (!cq->wc)
@@ -239,15 +271,18 @@ struct ib_cq *__ib_alloc_cq_user(struct ib_device *dev, void *private,
 		goto out_destroy_cq;
 	}
 
+	trace_cq_alloc(cq, nr_cqe, comp_vector, poll_ctx);
 	return cq;
 
 out_destroy_cq:
+	rdma_dim_destroy(cq);
 	rdma_restrack_del(&cq->res);
 	cq->device->ops.destroy_cq(cq, udata);
 out_free_wc:
 	kfree(cq->wc);
 out_free_cq:
 	kfree(cq);
+	trace_cq_alloc_error(nr_cqe, comp_vector, poll_ctx, ret);
 	return ERR_PTR(ret);
 }
 EXPORT_SYMBOL(__ib_alloc_cq_user);
@@ -289,6 +324,8 @@ void ib_free_cq_user(struct ib_cq *cq, struct ib_udata *udata)
 {
 	if (WARN_ON_ONCE(atomic_read(&cq->usecnt)))
 		return;
+	if (WARN_ON_ONCE(cq->cqe_used))
+		return;
 
 	switch (cq->poll_ctx) {
 	case IB_POLL_DIRECT:
@@ -304,12 +341,177 @@ void ib_free_cq_user(struct ib_cq *cq, struct ib_udata *udata)
 		WARN_ON_ONCE(1);
 	}
 
+	rdma_dim_destroy(cq);
+	trace_cq_free(cq);
 	rdma_restrack_del(&cq->res);
 	cq->device->ops.destroy_cq(cq, udata);
-	if (cq->dim)
-		cancel_work_sync(&cq->dim->work);
-	kfree(cq->dim);
 	kfree(cq->wc);
 	kfree(cq);
 }
 EXPORT_SYMBOL(ib_free_cq_user);
+
+void ib_cq_pool_init(struct ib_device *dev)
+{
+	unsigned int i;
+
+	spin_lock_init(&dev->cq_pools_lock);
+	for (i = 0; i < ARRAY_SIZE(dev->cq_pools); i++)
+		INIT_LIST_HEAD(&dev->cq_pools[i]);
+}
+
+void ib_cq_pool_destroy(struct ib_device *dev)
+{
+	struct ib_cq *cq, *n;
+	unsigned int i;
+
+	for (i = 0; i < ARRAY_SIZE(dev->cq_pools); i++) {
+		list_for_each_entry_safe(cq, n, &dev->cq_pools[i],
+					 pool_entry) {
+			WARN_ON(cq->cqe_used);
+			cq->shared = false;
+			ib_free_cq(cq);
+		}
+	}
+}
+
+static int ib_alloc_cqs(struct ib_device *dev, unsigned int nr_cqes,
+			enum ib_poll_context poll_ctx)
+{
+	LIST_HEAD(tmp_list);
+	unsigned int nr_cqs, i;
+	struct ib_cq *cq;
+	int ret;
+
+	if (poll_ctx > IB_POLL_LAST_POOL_TYPE) {
+		WARN_ON_ONCE(poll_ctx > IB_POLL_LAST_POOL_TYPE);
+		return -EINVAL;
+	}
+
+	/*
+	 * Allocate at least as many CQEs as requested, and otherwise
+	 * a reasonable batch size so that we can share CQs between
+	 * multiple users instead of allocating a larger number of CQs.
+	 */
+	nr_cqes = min_t(unsigned int, dev->attrs.max_cqe,
+			max(nr_cqes, IB_MAX_SHARED_CQ_SZ));
+	nr_cqs = min_t(unsigned int, dev->num_comp_vectors, num_online_cpus());
+	for (i = 0; i < nr_cqs; i++) {
+		cq = ib_alloc_cq(dev, NULL, nr_cqes, i, poll_ctx);
+		if (IS_ERR(cq)) {
+			ret = PTR_ERR(cq);
+			goto out_free_cqs;
+		}
+		cq->shared = true;
+		list_add_tail(&cq->pool_entry, &tmp_list);
+	}
+
+	spin_lock_irq(&dev->cq_pools_lock);
+	list_splice(&tmp_list, &dev->cq_pools[poll_ctx]);
+	spin_unlock_irq(&dev->cq_pools_lock);
+
+	return 0;
+
+out_free_cqs:
+	list_for_each_entry(cq, &tmp_list, pool_entry) {
+		cq->shared = false;
+		ib_free_cq(cq);
+	}
+	return ret;
+}
+
+/**
+ * ib_cq_pool_get() - Find the least used completion queue that matches
+ *   a given cpu hint (or least used for wild card affinity) and fits
+ *   nr_cqe.
+ * @dev: rdma device
+ * @nr_cqe: number of needed cqe entries
+ * @comp_vector_hint: completion vector hint (-1) for the driver to assign
+ *   a comp vector based on internal counter
+ * @poll_ctx: cq polling context
+ *
+ * Finds a cq that satisfies @comp_vector_hint and @nr_cqe requirements and
+ * claim entries in it for us.  In case there is no available cq, allocate
+ * a new cq with the requirements and add it to the device pool.
+ * IB_POLL_DIRECT cannot be used for shared cqs so it is not a valid value
+ * for @poll_ctx.
+ */
+struct ib_cq *ib_cq_pool_get(struct ib_device *dev, unsigned int nr_cqe,
+			     int comp_vector_hint,
+			     enum ib_poll_context poll_ctx)
+{
+	static unsigned int default_comp_vector;
+	unsigned int vector, num_comp_vectors;
+	struct ib_cq *cq, *found = NULL;
+	int ret;
+
+	if (poll_ctx > IB_POLL_LAST_POOL_TYPE) {
+		WARN_ON_ONCE(poll_ctx > IB_POLL_LAST_POOL_TYPE);
+		return ERR_PTR(-EINVAL);
+	}
+
+	num_comp_vectors =
+		min_t(unsigned int, dev->num_comp_vectors, num_online_cpus());
+	/* Project the affinty to the device completion vector range */
+	if (comp_vector_hint < 0) {
+		comp_vector_hint =
+			(READ_ONCE(default_comp_vector) + 1) % num_comp_vectors;
+		WRITE_ONCE(default_comp_vector, comp_vector_hint);
+	}
+	vector = comp_vector_hint % num_comp_vectors;
+
+	/*
+	 * Find the least used CQ with correct affinity and
+	 * enough free CQ entries
+	 */
+	while (!found) {
+		spin_lock_irq(&dev->cq_pools_lock);
+		list_for_each_entry(cq, &dev->cq_pools[poll_ctx],
+				    pool_entry) {
+			/*
+			 * Check to see if we have found a CQ with the
+			 * correct completion vector
+			 */
+			if (vector != cq->comp_vector)
+				continue;
+			if (cq->cqe_used + nr_cqe > cq->cqe)
+				continue;
+			found = cq;
+			break;
+		}
+
+		if (found) {
+			found->cqe_used += nr_cqe;
+			spin_unlock_irq(&dev->cq_pools_lock);
+
+			return found;
+		}
+		spin_unlock_irq(&dev->cq_pools_lock);
+
+		/*
+		 * Didn't find a match or ran out of CQs in the device
+		 * pool, allocate a new array of CQs.
+		 */
+		ret = ib_alloc_cqs(dev, nr_cqe, poll_ctx);
+		if (ret)
+			return ERR_PTR(ret);
+	}
+
+	return found;
+}
+EXPORT_SYMBOL(ib_cq_pool_get);
+
+/**
+ * ib_cq_pool_put - Return a CQ taken from a shared pool.
+ * @cq: The CQ to return.
+ * @nr_cqe: The max number of cqes that the user had requested.
+ */
+void ib_cq_pool_put(struct ib_cq *cq, unsigned int nr_cqe)
+{
+	if (WARN_ON_ONCE(nr_cqe > cq->cqe_used))
+		return;
+
+	spin_lock_irq(&cq->device->cq_pools_lock);
+	cq->cqe_used -= nr_cqe;
+	spin_unlock_irq(&cq->device->cq_pools_lock);
+}
+EXPORT_SYMBOL(ib_cq_pool_put);

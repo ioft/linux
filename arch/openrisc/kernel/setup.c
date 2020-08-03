@@ -35,7 +35,6 @@
 #include <linux/device.h>
 
 #include <asm/sections.h>
-#include <asm/pgtable.h>
 #include <asm/types.h>
 #include <asm/setup.h>
 #include <asm/io.h>
@@ -307,11 +306,6 @@ void __init setup_arch(char **cmdline_p)
 
 	/* paging_init() sets up the MMU and marks all pages as reserved */
 	paging_init();
-
-#if defined(CONFIG_VT) && defined(CONFIG_DUMMY_CONSOLE)
-	if (!conswitchp)
-		conswitchp = &dummy_con;
-#endif
 
 	*cmdline_p = boot_command_line;
 

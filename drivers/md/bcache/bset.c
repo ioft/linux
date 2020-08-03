@@ -6,7 +6,7 @@
  * Copyright 2012 Google, Inc.
  */
 
-#define pr_fmt(fmt) "bcache: %s() " fmt "\n", __func__
+#define pr_fmt(fmt) "bcache: %s() " fmt, __func__
 
 #include "util.h"
 #include "bset.h"
@@ -31,7 +31,7 @@ void bch_dump_bset(struct btree_keys *b, struct bset *i, unsigned int set)
 		if (b->ops->key_dump)
 			b->ops->key_dump(b, k);
 		else
-			pr_err("%llu:%llu\n", KEY_INODE(k), KEY_OFFSET(k));
+			pr_cont("%llu:%llu\n", KEY_INODE(k), KEY_OFFSET(k));
 
 		if (next < bset_bkey_last(i) &&
 		    bkey_cmp(k, b->ops->is_extents ?
@@ -1225,7 +1225,7 @@ static void btree_mergesort(struct btree_keys *b, struct bset *out,
 
 	out->keys = last ? (uint64_t *) bkey_next(last) - out->d : 0;
 
-	pr_debug("sorted %i keys", out->keys);
+	pr_debug("sorted %i keys\n", out->keys);
 }
 
 static void __btree_sort(struct btree_keys *b, struct btree_iter *iter,
@@ -1257,6 +1257,11 @@ static void __btree_sort(struct btree_keys *b, struct btree_iter *iter,
 		 * Our temporary buffer is the same size as the btree node's
 		 * buffer, we can just swap buffers instead of doing a big
 		 * memcpy()
+		 *
+		 * Don't worry event 'out' is allocated from mempool, it can
+		 * still be swapped here. Because state->pool is a page mempool
+		 * creaated by by mempool_init_page_pool(), which allocates
+		 * pages by alloc_pages() indeed.
 		 */
 
 		out->magic	= b->set->data->magic;

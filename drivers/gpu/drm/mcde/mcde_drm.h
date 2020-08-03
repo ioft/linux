@@ -19,6 +19,7 @@ struct mcde {
 	struct mipi_dsi_device *mdsi;
 	s16 stride;
 	bool te_sync;
+	bool video_mode;
 	bool oneshot_mode;
 	unsigned int flow_active;
 	spinlock_t flow_lock; /* Locks the channel flow control */
@@ -32,6 +33,8 @@ struct mcde {
 	struct regulator *epod;
 	struct regulator *vana;
 };
+
+#define to_mcde(dev) container_of(dev, struct mcde, drm)
 
 bool mcde_dsi_irq(struct mipi_dsi_device *mdsi);
 void mcde_dsi_te_request(struct mipi_dsi_device *mdsi);

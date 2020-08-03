@@ -3,7 +3,7 @@
 #define _ASM_IO_H
 
 #include <linux/types.h>
-#include <asm/pgtable.h>
+#include <linux/pgtable.h>
 
 #define virt_to_phys(a) ((unsigned long)__pa(a))
 #define phys_to_virt(a) __va(a)
@@ -128,9 +128,8 @@ static inline void gsc_writeq(unsigned long long val, unsigned long addr)
  * The standard PCI ioremap interfaces
  */
 void __iomem *ioremap(unsigned long offset, unsigned long size);
-#define ioremap_nocache(off, sz)	ioremap((off), (sz))
-#define ioremap_wc			ioremap_nocache
-#define ioremap_uc			ioremap_nocache
+#define ioremap_wc			ioremap
+#define ioremap_uc			ioremap
 
 extern void iounmap(const volatile void __iomem *addr);
 

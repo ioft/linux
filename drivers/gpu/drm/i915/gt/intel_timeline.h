@@ -31,11 +31,6 @@
 #include "i915_syncmap.h"
 #include "gt/intel_timeline_types.h"
 
-int intel_timeline_init(struct intel_timeline *tl,
-			struct intel_gt *gt,
-			struct i915_vma *hwsp);
-void intel_timeline_fini(struct intel_timeline *tl);
-
 struct intel_timeline *
 intel_timeline_create(struct intel_gt *gt, struct i915_vma *global_hwsp);
 
@@ -84,11 +79,13 @@ int intel_timeline_get_seqno(struct intel_timeline *tl,
 void intel_timeline_exit(struct intel_timeline *tl);
 void intel_timeline_unpin(struct intel_timeline *tl);
 
+void intel_timeline_reset_seqno(const struct intel_timeline *tl);
+
 int intel_timeline_read_hwsp(struct i915_request *from,
 			     struct i915_request *until,
 			     u32 *hwsp_offset);
 
-void intel_timelines_init(struct drm_i915_private *i915);
-void intel_timelines_fini(struct drm_i915_private *i915);
+void intel_gt_init_timelines(struct intel_gt *gt);
+void intel_gt_fini_timelines(struct intel_gt *gt);
 
 #endif

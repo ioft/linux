@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 #include <test_progs.h>
+#include <network_helpers.h>
 
 void test_skb_ctx(void)
 {
@@ -11,6 +12,10 @@ void test_skb_ctx(void)
 		.cb[4] = 5,
 		.priority = 6,
 		.tstamp = 7,
+		.wire_len = 100,
+		.gso_segs = 8,
+		.mark = 9,
+		.gso_size = 10,
 	};
 	struct bpf_prog_test_run_attr tattr = {
 		.data_in = &pkt_v4,
@@ -91,4 +96,8 @@ void test_skb_ctx(void)
 		   "ctx_out_tstamp",
 		   "skb->tstamp == %lld, expected %d\n",
 		   skb.tstamp, 8);
+	CHECK_ATTR(skb.mark != 10,
+		   "ctx_out_mark",
+		   "skb->mark == %u, expected %d\n",
+		   skb.mark, 10);
 }

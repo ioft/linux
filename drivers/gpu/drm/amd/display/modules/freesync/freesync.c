@@ -37,8 +37,8 @@
 #define STATIC_SCREEN_RAMP_DELTA_REFRESH_RATE_PER_FRAME ((1000 / 60) * 65)
 /* Number of elements in the render times cache array */
 #define RENDER_TIMES_MAX_COUNT 10
-/* Threshold to exit BTR (to avoid frequent enter-exits at the lower limit) */
-#define BTR_EXIT_MARGIN 2000
+/* Threshold to exit/exit BTR (to avoid frequent enter-exits at the lower limit) */
+#define BTR_MAX_MARGIN 2500
 /* Threshold to change BTR multiplier (to avoid frequent changes) */
 #define BTR_DRIFT_MARGIN 2000
 /*Threshold to exit fixed refresh rate*/
@@ -122,7 +122,7 @@ static unsigned int calc_v_total_from_refresh(
 		const struct dc_stream_state *stream,
 		unsigned int refresh_in_uhz)
 {
-	unsigned int v_total = stream->timing.v_total;
+	unsigned int v_total;
 	unsigned int frame_duration_in_ns;
 
 	frame_duration_in_ns =
@@ -254,24 +254,22 @@ static void apply_below_the_range(struct core_freesync *core_freesync,
 	unsigned int delta_from_mid_point_in_us_1 = 0xFFFFFFFF;
 	unsigned int delta_from_mid_point_in_us_2 = 0xFFFFFFFF;
 	unsigned int frames_to_insert = 0;
-	unsigned int min_frame_duration_in_ns = 0;
-	unsigned int max_render_time_in_us = in_out_vrr->max_duration_in_us;
 	unsigned int delta_from_mid_point_delta_in_us;
-
-	min_frame_duration_in_ns = ((unsigned int) (div64_u64(
-		(1000000000ULL * 1000000),
-		in_out_vrr->max_refresh_in_uhz)));
+	unsigned int max_render_time_in_us =
+			in_out_vrr->max_duration_in_us - in_out_vrr->btr.margin_in_us;
 
 	/* Program BTR */
-	if (last_render_time_in_us + BTR_EXIT_MARGIN < max_render_time_in_us) {
+	if ((last_render_time_in_us + in_out_vrr->btr.margin_in_us / 2) < max_render_time_in_us) {
 		/* Exit Below the Range */
 		if (in_out_vrr->btr.btr_active) {
 			in_out_vrr->btr.frame_counter = 0;
 			in_out_vrr->btr.btr_active = false;
 		}
-	} else if (last_render_time_in_us > max_render_time_in_us) {
+	} else if (last_render_time_in_us > (max_render_time_in_us + in_out_vrr->btr.margin_in_us / 2)) {
 		/* Enter Below the Range */
-		in_out_vrr->btr.btr_active = true;
+		if (!in_out_vrr->btr.btr_active) {
+			in_out_vrr->btr.btr_active = true;
+		}
 	}
 
 	/* BTR set to "not active" so disengage */
@@ -327,7 +325,9 @@ static void apply_below_the_range(struct core_freesync *core_freesync,
 		/* Choose number of frames to insert based on how close it
 		 * can get to the mid point of the variable range.
 		 */
-		if (delta_from_mid_point_in_us_1 < delta_from_mid_point_in_us_2) {
+		if ((frame_time_in_us / mid_point_frames_ceil) > in_out_vrr->min_duration_in_us &&
+				(delta_from_mid_point_in_us_1 < delta_from_mid_point_in_us_2 ||
+						mid_point_frames_floor < 2)) {
 			frames_to_insert = mid_point_frames_ceil;
 			delta_from_mid_point_delta_in_us = delta_from_mid_point_in_us_2 -
 					delta_from_mid_point_in_us_1;
@@ -343,7 +343,7 @@ static void apply_below_the_range(struct core_freesync *core_freesync,
 		if (in_out_vrr->btr.frames_to_insert != 0 &&
 				delta_from_mid_point_delta_in_us < BTR_DRIFT_MARGIN) {
 			if (((last_render_time_in_us / in_out_vrr->btr.frames_to_insert) <
-					in_out_vrr->max_duration_in_us) &&
+					max_render_time_in_us) &&
 				((last_render_time_in_us / in_out_vrr->btr.frames_to_insert) >
 					in_out_vrr->min_duration_in_us))
 				frames_to_insert = in_out_vrr->btr.frames_to_insert;
@@ -381,7 +381,7 @@ static void apply_fixed_refresh(struct core_freesync *core_freesync,
 	bool update = false;
 	unsigned int max_render_time_in_us = in_out_vrr->max_duration_in_us;
 
-	//Compute the exit refresh rate and exit frame duration
+	/* Compute the exit refresh rate and exit frame duration */
 	unsigned int exit_refresh_rate_in_milli_hz = ((1000000000/max_render_time_in_us)
 			+ (1000*FIXED_REFRESH_EXIT_MARGIN_IN_HZ));
 	unsigned int exit_frame_duration_in_us = 1000000000/exit_refresh_rate_in_milli_hz;
@@ -443,7 +443,7 @@ static bool vrr_settings_require_update(struct core_freesync *core_freesync,
 		return true;
 	} else if (in_vrr->state == VRR_STATE_ACTIVE_FIXED &&
 			in_vrr->fixed.target_refresh_in_uhz !=
-					in_config->min_refresh_in_uhz) {
+					in_config->fixed_refresh_in_uhz) {
 		return true;
 	} else if (in_vrr->min_refresh_in_uhz != min_refresh_in_uhz) {
 		return true;
@@ -491,7 +491,7 @@ bool mod_freesync_get_v_position(struct mod_freesync *mod_freesync,
 	return false;
 }
 
-static void build_vrr_infopacket_data(const struct mod_vrr_params *vrr,
+static void build_vrr_infopacket_data_v1(const struct mod_vrr_params *vrr,
 		struct dc_info_packet *infopacket)
 {
 	/* PB1 = 0x1A (24bit AMD IEEE OUI (0x00001A) - Byte 0) */
@@ -523,14 +523,74 @@ static void build_vrr_infopacket_data(const struct mod_vrr_params *vrr,
 			vrr->state == VRR_STATE_ACTIVE_FIXED)
 		infopacket->sb[6] |= 0x04;
 
+	// For v1 & 2 infoframes program nominal if non-fs mode, otherwise full range
 	/* PB7 = FreeSync Minimum refresh rate (Hz) */
-	infopacket->sb[7] = (unsigned char)(vrr->min_refresh_in_uhz / 1000000);
+	if (vrr->state == VRR_STATE_ACTIVE_VARIABLE ||
+			vrr->state == VRR_STATE_ACTIVE_FIXED) {
+		infopacket->sb[7] = (unsigned char)((vrr->min_refresh_in_uhz + 500000) / 1000000);
+	} else {
+		infopacket->sb[7] = (unsigned char)((vrr->max_refresh_in_uhz + 500000) / 1000000);
+	}
 
 	/* PB8 = FreeSync Maximum refresh rate (Hz)
 	 * Note: We should never go above the field rate of the mode timing set.
 	 */
-	infopacket->sb[8] = (unsigned char)(vrr->max_refresh_in_uhz / 1000000);
+	infopacket->sb[8] = (unsigned char)((vrr->max_refresh_in_uhz + 500000) / 1000000);
 
+	//FreeSync HDR
+	infopacket->sb[9] = 0;
+	infopacket->sb[10] = 0;
+}
+
+static void build_vrr_infopacket_data_v3(const struct mod_vrr_params *vrr,
+		struct dc_info_packet *infopacket)
+{
+	/* PB1 = 0x1A (24bit AMD IEEE OUI (0x00001A) - Byte 0) */
+	infopacket->sb[1] = 0x1A;
+
+	/* PB2 = 0x00 (24bit AMD IEEE OUI (0x00001A) - Byte 1) */
+	infopacket->sb[2] = 0x00;
+
+	/* PB3 = 0x00 (24bit AMD IEEE OUI (0x00001A) - Byte 2) */
+	infopacket->sb[3] = 0x00;
+
+	/* PB4 = Reserved */
+
+	/* PB5 = Reserved */
+
+	/* PB6 = [Bits 7:3 = Reserved] */
+
+	/* PB6 = [Bit 0 = FreeSync Supported] */
+	if (vrr->state != VRR_STATE_UNSUPPORTED)
+		infopacket->sb[6] |= 0x01;
+
+	/* PB6 = [Bit 1 = FreeSync Enabled] */
+	if (vrr->state != VRR_STATE_DISABLED &&
+			vrr->state != VRR_STATE_UNSUPPORTED)
+		infopacket->sb[6] |= 0x02;
+
+	/* PB6 = [Bit 2 = FreeSync Active] */
+	if (vrr->state == VRR_STATE_ACTIVE_VARIABLE ||
+			vrr->state == VRR_STATE_ACTIVE_FIXED)
+		infopacket->sb[6] |= 0x04;
+
+	if (vrr->state == VRR_STATE_ACTIVE_FIXED) {
+		/* PB7 = FreeSync Minimum refresh rate (Hz) */
+		infopacket->sb[7] = (unsigned char)((vrr->fixed_refresh_in_uhz + 500000) / 1000000);
+		/* PB8 = FreeSync Maximum refresh rate (Hz) */
+		infopacket->sb[8] = (unsigned char)((vrr->fixed_refresh_in_uhz + 500000) / 1000000);
+	} else if (vrr->state == VRR_STATE_ACTIVE_VARIABLE) {
+		/* PB7 = FreeSync Minimum refresh rate (Hz) */
+		infopacket->sb[7] = (unsigned char)((vrr->min_refresh_in_uhz + 500000) / 1000000);
+		/* PB8 = FreeSync Maximum refresh rate (Hz) */
+		infopacket->sb[8] = (unsigned char)((vrr->max_refresh_in_uhz + 500000) / 1000000);
+	} else {
+		// Non-fs case, program nominal range
+		/* PB7 = FreeSync Minimum refresh rate (Hz) */
+		infopacket->sb[7] = (unsigned char)((vrr->max_refresh_in_uhz + 500000) / 1000000);
+		/* PB8 = FreeSync Maximum refresh rate (Hz) */
+		infopacket->sb[8] = (unsigned char)((vrr->max_refresh_in_uhz + 500000) / 1000000);
+	}
 
 	//FreeSync HDR
 	infopacket->sb[9] = 0;
@@ -678,7 +738,7 @@ static void build_vrr_infopacket_v1(enum signal_type signal,
 	unsigned int payload_size = 0;
 
 	build_vrr_infopacket_header_v1(signal, infopacket, &payload_size);
-	build_vrr_infopacket_data(vrr, infopacket);
+	build_vrr_infopacket_data_v1(vrr, infopacket);
 	build_vrr_infopacket_checksum(&payload_size, infopacket);
 
 	infopacket->valid = true;
@@ -692,7 +752,24 @@ static void build_vrr_infopacket_v2(enum signal_type signal,
 	unsigned int payload_size = 0;
 
 	build_vrr_infopacket_header_v2(signal, infopacket, &payload_size);
-	build_vrr_infopacket_data(vrr, infopacket);
+	build_vrr_infopacket_data_v1(vrr, infopacket);
+
+	build_vrr_infopacket_fs2_data(app_tf, infopacket);
+
+	build_vrr_infopacket_checksum(&payload_size, infopacket);
+
+	infopacket->valid = true;
+}
+
+static void build_vrr_infopacket_v3(enum signal_type signal,
+		const struct mod_vrr_params *vrr,
+		enum color_transfer_func app_tf,
+		struct dc_info_packet *infopacket)
+{
+	unsigned int payload_size = 0;
+
+	build_vrr_infopacket_header_v2(signal, infopacket, &payload_size);
+	build_vrr_infopacket_data_v3(vrr, infopacket);
 
 	build_vrr_infopacket_fs2_data(app_tf, infopacket);
 
@@ -717,11 +794,14 @@ void mod_freesync_build_vrr_infopacket(struct mod_freesync *mod_freesync,
 		return;
 
 	switch (packet_type) {
-	case PACKET_TYPE_FS2:
+	case PACKET_TYPE_FS_V3:
+		build_vrr_infopacket_v3(stream->signal, vrr, app_tf, infopacket);
+		break;
+	case PACKET_TYPE_FS_V2:
 		build_vrr_infopacket_v2(stream->signal, vrr, app_tf, infopacket);
 		break;
 	case PACKET_TYPE_VRR:
-	case PACKET_TYPE_FS1:
+	case PACKET_TYPE_FS_V1:
 	default:
 		build_vrr_infopacket_v1(stream->signal, vrr, infopacket);
 	}
@@ -734,6 +814,7 @@ void mod_freesync_build_vrr_params(struct mod_freesync *mod_freesync,
 {
 	struct core_freesync *core_freesync = NULL;
 	unsigned long long nominal_field_rate_in_uhz = 0;
+	unsigned long long rounded_nominal_in_uhz = 0;
 	unsigned int refresh_range = 0;
 	unsigned long long min_refresh_in_uhz = 0;
 	unsigned long long max_refresh_in_uhz = 0;
@@ -747,24 +828,23 @@ void mod_freesync_build_vrr_params(struct mod_freesync *mod_freesync,
 	nominal_field_rate_in_uhz =
 			mod_freesync_calc_nominal_field_rate(stream);
 
-	/* Rounded to the nearest Hz */
-	nominal_field_rate_in_uhz = 1000000ULL *
-			div_u64(nominal_field_rate_in_uhz + 500000, 1000000);
-
 	min_refresh_in_uhz = in_config->min_refresh_in_uhz;
 	max_refresh_in_uhz = in_config->max_refresh_in_uhz;
-
-	// Don't allow min > max
-	if (min_refresh_in_uhz > max_refresh_in_uhz)
-		min_refresh_in_uhz = max_refresh_in_uhz;
 
 	// Full range may be larger than current video timing, so cap at nominal
 	if (max_refresh_in_uhz > nominal_field_rate_in_uhz)
 		max_refresh_in_uhz = nominal_field_rate_in_uhz;
 
 	// Full range may be larger than current video timing, so cap at nominal
-	if (min_refresh_in_uhz > nominal_field_rate_in_uhz)
-		min_refresh_in_uhz = nominal_field_rate_in_uhz;
+	if (min_refresh_in_uhz > max_refresh_in_uhz)
+		min_refresh_in_uhz = max_refresh_in_uhz;
+
+	// If a monitor reports exactly max refresh of 2x of min, enforce it on nominal
+	rounded_nominal_in_uhz =
+			div_u64(nominal_field_rate_in_uhz + 50000, 100000) * 100000;
+	if (in_config->max_refresh_in_uhz == (2 * in_config->min_refresh_in_uhz) &&
+		in_config->max_refresh_in_uhz == rounded_nominal_in_uhz)
+		min_refresh_in_uhz = div_u64(nominal_field_rate_in_uhz, 2);
 
 	if (!vrr_settings_require_update(core_freesync,
 			in_config, (unsigned int)min_refresh_in_uhz, (unsigned int)max_refresh_in_uhz,
@@ -793,6 +873,11 @@ void mod_freesync_build_vrr_params(struct mod_freesync *mod_freesync,
 				calc_duration_in_us_from_refresh_in_uhz(
 						(unsigned int)max_refresh_in_uhz);
 
+		if (in_config->state == VRR_STATE_ACTIVE_FIXED)
+			in_out_vrr->fixed_refresh_in_uhz = in_config->fixed_refresh_in_uhz;
+		else
+			in_out_vrr->fixed_refresh_in_uhz = 0;
+
 		refresh_range = in_out_vrr->max_refresh_in_uhz -
 				in_out_vrr->min_refresh_in_uhz;
 
@@ -803,14 +888,22 @@ void mod_freesync_build_vrr_params(struct mod_freesync *mod_freesync,
 
 	in_out_vrr->btr.btr_enabled = in_config->btr;
 
-	if (in_out_vrr->max_refresh_in_uhz <
-			2 * in_out_vrr->min_refresh_in_uhz)
+	if (in_out_vrr->max_refresh_in_uhz < (2 * in_out_vrr->min_refresh_in_uhz))
 		in_out_vrr->btr.btr_enabled = false;
+	else {
+		in_out_vrr->btr.margin_in_us = in_out_vrr->max_duration_in_us -
+				2 * in_out_vrr->min_duration_in_us;
+		if (in_out_vrr->btr.margin_in_us > BTR_MAX_MARGIN)
+			in_out_vrr->btr.margin_in_us = BTR_MAX_MARGIN;
+	}
 
 	in_out_vrr->btr.btr_active = false;
 	in_out_vrr->btr.inserted_duration_in_us = 0;
 	in_out_vrr->btr.frames_to_insert = 0;
 	in_out_vrr->btr.frame_counter = 0;
+	in_out_vrr->fixed.fixed_active = false;
+	in_out_vrr->fixed.target_refresh_in_uhz = 0;
+
 	in_out_vrr->btr.mid_point_in_us =
 				(in_out_vrr->min_duration_in_us +
 				 in_out_vrr->max_duration_in_us) / 2;
@@ -826,6 +919,7 @@ void mod_freesync_build_vrr_params(struct mod_freesync *mod_freesync,
 		in_out_vrr->adjust.v_total_max = stream->timing.v_total;
 	} else if (in_out_vrr->state == VRR_STATE_ACTIVE_VARIABLE &&
 			refresh_range >= MIN_REFRESH_RANGE_IN_US) {
+
 		in_out_vrr->adjust.v_total_min =
 			calc_v_total_from_refresh(stream,
 				in_out_vrr->max_refresh_in_uhz);
@@ -834,7 +928,7 @@ void mod_freesync_build_vrr_params(struct mod_freesync *mod_freesync,
 				in_out_vrr->min_refresh_in_uhz);
 	} else if (in_out_vrr->state == VRR_STATE_ACTIVE_FIXED) {
 		in_out_vrr->fixed.target_refresh_in_uhz =
-				in_out_vrr->min_refresh_in_uhz;
+				in_out_vrr->fixed_refresh_in_uhz;
 		if (in_out_vrr->fixed.ramping_active &&
 				in_out_vrr->fixed.fixed_active) {
 			/* Do not update vtotals if ramping is already active
@@ -1003,8 +1097,8 @@ unsigned long long mod_freesync_calc_nominal_field_rate(
 	unsigned int total = stream->timing.h_total * stream->timing.v_total;
 
 	/* Calculate nominal field rate for stream, rounded up to nearest integer */
-	nominal_field_rate_in_uhz = stream->timing.pix_clk_100hz / 10;
-	nominal_field_rate_in_uhz *= 1000ULL * 1000ULL * 1000ULL;
+	nominal_field_rate_in_uhz = stream->timing.pix_clk_100hz;
+	nominal_field_rate_in_uhz *= 100000000ULL;
 
 	nominal_field_rate_in_uhz =	div_u64(nominal_field_rate_in_uhz, total);
 

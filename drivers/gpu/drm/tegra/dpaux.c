@@ -5,12 +5,10 @@
 
 #include <linux/clk.h>
 #include <linux/delay.h>
-#include <linux/gpio.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
 #include <linux/module.h>
 #include <linux/of_device.h>
-#include <linux/of_gpio.h>
 #include <linux/pinctrl/pinconf-generic.h>
 #include <linux/pinctrl/pinctrl.h>
 #include <linux/pinctrl/pinmux.h>
@@ -588,7 +586,7 @@ static int tegra_dpaux_remove(struct platform_device *pdev)
 	/* make sure pads are powered down when not in use */
 	tegra_dpaux_pad_power_down(dpaux);
 
-	pm_runtime_put(&pdev->dev);
+	pm_runtime_put_sync(&pdev->dev);
 	pm_runtime_disable(&pdev->dev);
 
 	drm_dp_aux_unregister(&dpaux->aux);

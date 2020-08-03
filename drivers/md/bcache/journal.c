@@ -47,7 +47,7 @@ static int journal_read_bucket(struct cache *ca, struct list_head *list,
 
 	closure_init_stack(&cl);
 
-	pr_debug("reading %u", bucket_index);
+	pr_debug("reading %u\n", bucket_index);
 
 	while (offset < ca->sb.bucket_size) {
 reread:		left = ca->sb.bucket_size - offset;
@@ -78,13 +78,13 @@ reread:		left = ca->sb.bucket_size - offset;
 			size_t blocks, bytes = set_bytes(j);
 
 			if (j->magic != jset_magic(&ca->sb)) {
-				pr_debug("%u: bad magic", bucket_index);
+				pr_debug("%u: bad magic\n", bucket_index);
 				return ret;
 			}
 
 			if (bytes > left << 9 ||
 			    bytes > PAGE_SIZE << JSET_BITS) {
-				pr_info("%u: too big, %zu bytes, offset %u",
+				pr_info("%u: too big, %zu bytes, offset %u\n",
 					bucket_index, bytes, offset);
 				return ret;
 			}
@@ -93,7 +93,7 @@ reread:		left = ca->sb.bucket_size - offset;
 				goto reread;
 
 			if (j->csum != csum_set(j)) {
-				pr_info("%u: bad csum, %zu bytes, offset %u",
+				pr_info("%u: bad csum, %zu bytes, offset %u\n",
 					bucket_index, bytes, offset);
 				return ret;
 			}
@@ -190,7 +190,7 @@ int bch_journal_read(struct cache_set *c, struct list_head *list)
 		uint64_t seq;
 
 		bitmap_zero(bitmap, SB_JOURNAL_BUCKETS);
-		pr_debug("%u journal buckets", ca->sb.njournal_buckets);
+		pr_debug("%u journal buckets\n", ca->sb.njournal_buckets);
 
 		/*
 		 * Read journal buckets ordered by golden ratio hash to quickly
@@ -215,7 +215,7 @@ int bch_journal_read(struct cache_set *c, struct list_head *list)
 		 * If that fails, check all the buckets we haven't checked
 		 * already
 		 */
-		pr_debug("falling back to linear search");
+		pr_debug("falling back to linear search\n");
 
 		for (l = find_first_zero_bit(bitmap, ca->sb.njournal_buckets);
 		     l < ca->sb.njournal_buckets;
@@ -233,7 +233,7 @@ bsearch:
 		/* Binary search */
 		m = l;
 		r = find_next_bit(bitmap, ca->sb.njournal_buckets, l + 1);
-		pr_debug("starting binary search, l %u r %u", l, r);
+		pr_debug("starting binary search, l %u r %u\n", l, r);
 
 		while (l + 1 < r) {
 			seq = list_entry(list->prev, struct journal_replay,
@@ -253,7 +253,7 @@ bsearch:
 		 * Read buckets in reverse order until we stop finding more
 		 * journal entries
 		 */
-		pr_debug("finishing up: m %u njournal_buckets %u",
+		pr_debug("finishing up: m %u njournal_buckets %u\n",
 			 m, ca->sb.njournal_buckets);
 		l = m;
 
@@ -370,10 +370,10 @@ int bch_journal_replay(struct cache_set *s, struct list_head *list)
 
 		if (n != i->j.seq) {
 			if (n == start && is_discard_enabled(s))
-				pr_info("bcache: journal entries %llu-%llu may be discarded! (replaying %llu-%llu)",
+				pr_info("journal entries %llu-%llu may be discarded! (replaying %llu-%llu)\n",
 					n, i->j.seq - 1, start, end);
 			else {
-				pr_err("bcache: journal entries %llu-%llu missing! (replaying %llu-%llu)",
+				pr_err("journal entries %llu-%llu missing! (replaying %llu-%llu)\n",
 					n, i->j.seq - 1, start, end);
 				ret = -EIO;
 				goto err;
@@ -403,7 +403,7 @@ int bch_journal_replay(struct cache_set *s, struct list_head *list)
 		entries++;
 	}
 
-	pr_info("journal replay done, %i keys in %i entries, seq %llu",
+	pr_info("journal replay done, %i keys in %i entries, seq %llu\n",
 		keys, entries, end);
 err:
 	while (!list_empty(list)) {
@@ -420,7 +420,10 @@ err:
 static void btree_flush_write(struct cache_set *c)
 {
 	struct btree *b, *t, *btree_nodes[BTREE_FLUSH_NR];
-	unsigned int i, n;
+	unsigned int i, nr;
+	int ref_nr;
+	atomic_t *fifo_front_p, *now_fifo_front_p;
+	size_t mask;
 
 	if (c->journal.btree_flushing)
 		return;
@@ -433,14 +436,52 @@ static void btree_flush_write(struct cache_set *c)
 	c->journal.btree_flushing = true;
 	spin_unlock(&c->journal.flush_write_lock);
 
+	/* get the oldest journal entry and check its refcount */
+	spin_lock(&c->journal.lock);
+	fifo_front_p = &fifo_front(&c->journal.pin);
+	ref_nr = atomic_read(fifo_front_p);
+	if (ref_nr <= 0) {
+		/*
+		 * do nothing if no btree node references
+		 * the oldest journal entry
+		 */
+		spin_unlock(&c->journal.lock);
+		goto out;
+	}
+	spin_unlock(&c->journal.lock);
+
+	mask = c->journal.pin.mask;
+	nr = 0;
 	atomic_long_inc(&c->flush_write);
 	memset(btree_nodes, 0, sizeof(btree_nodes));
-	n = 0;
 
 	mutex_lock(&c->bucket_lock);
 	list_for_each_entry_safe_reverse(b, t, &c->btree_cache, list) {
+		/*
+		 * It is safe to get now_fifo_front_p without holding
+		 * c->journal.lock here, because we don't need to know
+		 * the exactly accurate value, just check whether the
+		 * front pointer of c->journal.pin is changed.
+		 */
+		now_fifo_front_p = &fifo_front(&c->journal.pin);
+		/*
+		 * If the oldest journal entry is reclaimed and front
+		 * pointer of c->journal.pin changes, it is unnecessary
+		 * to scan c->btree_cache anymore, just quit the loop and
+		 * flush out what we have already.
+		 */
+		if (now_fifo_front_p != fifo_front_p)
+			break;
+		/*
+		 * quit this loop if all matching btree nodes are
+		 * scanned and record in btree_nodes[] already.
+		 */
+		ref_nr = atomic_read(fifo_front_p);
+		if (nr >= ref_nr)
+			break;
+
 		if (btree_node_journal_flush(b))
-			pr_err("BUG: flush_write bit should not be set here!");
+			pr_err("BUG: flush_write bit should not be set here!\n");
 
 		mutex_lock(&b->write_lock);
 
@@ -450,6 +491,25 @@ static void btree_flush_write(struct cache_set *c)
 		}
 
 		if (!btree_current_write(b)->journal) {
+			mutex_unlock(&b->write_lock);
+			continue;
+		}
+
+		/*
+		 * Only select the btree node which exactly references
+		 * the oldest journal entry.
+		 *
+		 * If the journal entry pointed by fifo_front_p is
+		 * reclaimed in parallel, don't worry:
+		 * - the list_for_each_xxx loop will quit when checking
+		 *   next now_fifo_front_p.
+		 * - If there are matched nodes recorded in btree_nodes[],
+		 *   they are clean now (this is why and how the oldest
+		 *   journal entry can be reclaimed). These selected nodes
+		 *   will be ignored and skipped in the folowing for-loop.
+		 */
+		if (((btree_current_write(b)->journal - fifo_front_p) &
+		     mask) != 0) {
 			mutex_unlock(&b->write_lock);
 			continue;
 		}
@@ -458,22 +518,29 @@ static void btree_flush_write(struct cache_set *c)
 
 		mutex_unlock(&b->write_lock);
 
-		btree_nodes[n++] = b;
-		if (n == BTREE_FLUSH_NR)
+		btree_nodes[nr++] = b;
+		/*
+		 * To avoid holding c->bucket_lock too long time,
+		 * only scan for BTREE_FLUSH_NR matched btree nodes
+		 * at most. If there are more btree nodes reference
+		 * the oldest journal entry, try to flush them next
+		 * time when btree_flush_write() is called.
+		 */
+		if (nr == BTREE_FLUSH_NR)
 			break;
 	}
 	mutex_unlock(&c->bucket_lock);
 
-	for (i = 0; i < n; i++) {
+	for (i = 0; i < nr; i++) {
 		b = btree_nodes[i];
 		if (!b) {
-			pr_err("BUG: btree_nodes[%d] is NULL", i);
+			pr_err("BUG: btree_nodes[%d] is NULL\n", i);
 			continue;
 		}
 
 		/* safe to check without holding b->write_lock */
 		if (!btree_node_journal_flush(b)) {
-			pr_err("BUG: bnode %p: journal_flush bit cleaned", b);
+			pr_err("BUG: bnode %p: journal_flush bit cleaned\n", b);
 			continue;
 		}
 
@@ -481,14 +548,14 @@ static void btree_flush_write(struct cache_set *c)
 		if (!btree_current_write(b)->journal) {
 			clear_bit(BTREE_NODE_journal_flush, &b->flags);
 			mutex_unlock(&b->write_lock);
-			pr_debug("bnode %p: written by others", b);
+			pr_debug("bnode %p: written by others\n", b);
 			continue;
 		}
 
 		if (!btree_node_dirty(b)) {
 			clear_bit(BTREE_NODE_journal_flush, &b->flags);
 			mutex_unlock(&b->write_lock);
-			pr_debug("bnode %p: dirty bit cleaned by others", b);
+			pr_debug("bnode %p: dirty bit cleaned by others\n", b);
 			continue;
 		}
 
@@ -497,6 +564,7 @@ static void btree_flush_write(struct cache_set *c)
 		mutex_unlock(&b->write_lock);
 	}
 
+out:
 	spin_lock(&c->journal.flush_write_lock);
 	c->journal.btree_flushing = false;
 	spin_unlock(&c->journal.flush_write_lock);
@@ -648,7 +716,7 @@ void bch_journal_next(struct journal *j)
 	j->cur->data->keys	= 0;
 
 	if (fifo_full(&j->pin))
-		pr_debug("journal_pin full (%zu)", fifo_used(&j->pin));
+		pr_debug("journal_pin full (%zu)\n", fifo_used(&j->pin));
 }
 
 static void journal_write_endio(struct bio *bio)

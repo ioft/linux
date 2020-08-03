@@ -7,7 +7,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <libbpf.h>
+#include <bpf/bpf.h>
+#include <bpf/libbpf.h>
 #include <net/if.h>
 #include <linux/if.h>
 #include <linux/rtnetlink.h>
@@ -16,8 +17,8 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
-#include <bpf.h>
-#include <nlattr.h>
+#include "bpf/nlattr.h"
+#include "bpf/libbpf_internal.h"
 #include "main.h"
 #include "netlink_dumper.h"
 
@@ -457,10 +458,10 @@ static int do_help(int argc, char **argv)
 	}
 
 	fprintf(stderr,
-		"Usage: %s %s { show | list } [dev <devname>]\n"
-		"       %s %s attach ATTACH_TYPE PROG dev <devname> [ overwrite ]\n"
-		"       %s %s detach ATTACH_TYPE dev <devname>\n"
-		"       %s %s help\n"
+		"Usage: %1$s %2$s { show | list } [dev <devname>]\n"
+		"       %1$s %2$s attach ATTACH_TYPE PROG dev <devname> [ overwrite ]\n"
+		"       %1$s %2$s detach ATTACH_TYPE dev <devname>\n"
+		"       %1$s %2$s help\n"
 		"\n"
 		"       " HELP_SPEC_PROGRAM "\n"
 		"       ATTACH_TYPE := { xdp | xdpgeneric | xdpdrv | xdpoffload }\n"
@@ -469,8 +470,8 @@ static int do_help(int argc, char **argv)
 		"      For progs attached to cgroups, use \"bpftool cgroup\"\n"
 		"      to dump program attachments. For program types\n"
 		"      sk_{filter,skb,msg,reuseport} and lwt/seg6, please\n"
-		"      consult iproute2.\n",
-		bin_name, argv[-2], bin_name, argv[-2], bin_name, argv[-2],
+		"      consult iproute2.\n"
+		"",
 		bin_name, argv[-2]);
 
 	return 0;

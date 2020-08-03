@@ -98,7 +98,7 @@ static inline void VXGE_COMPLETE_VPATH_TX(struct vxge_fifo *fifo)
 {
 	struct sk_buff **skb_ptr = NULL;
 	struct sk_buff **temp;
-#define NR_SKB_COMPLETED 128
+#define NR_SKB_COMPLETED 16
 	struct sk_buff *completed[NR_SKB_COMPLETED];
 	int more;
 
@@ -3273,7 +3273,7 @@ static int vxge_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
  * This function is triggered if the Tx Queue is stopped
  * for a pre-defined amount of time when the Interface is still up.
  */
-static void vxge_tx_watchdog(struct net_device *dev)
+static void vxge_tx_watchdog(struct net_device *dev, unsigned int txqueue)
 {
 	struct vxgedev *vdev;
 

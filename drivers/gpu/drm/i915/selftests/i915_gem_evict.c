@@ -45,8 +45,8 @@ static void quirk_add(struct drm_i915_gem_object *obj,
 
 static int populate_ggtt(struct i915_ggtt *ggtt, struct list_head *objects)
 {
-	unsigned long unbound, bound, count;
 	struct drm_i915_gem_object *obj;
+	unsigned long count;
 
 	count = 0;
 	do {
@@ -71,30 +71,6 @@ static int populate_ggtt(struct i915_ggtt *ggtt, struct list_head *objects)
 	} while (1);
 	pr_debug("Filled GGTT with %lu pages [%llu total]\n",
 		 count, ggtt->vm.total / PAGE_SIZE);
-
-	bound = 0;
-	unbound = 0;
-	list_for_each_entry(obj, objects, st_link) {
-		GEM_BUG_ON(!obj->mm.quirked);
-
-		if (atomic_read(&obj->bind_count))
-			bound++;
-		else
-			unbound++;
-	}
-	GEM_BUG_ON(bound + unbound != count);
-
-	if (unbound) {
-		pr_err("%s: Found %lu objects unbound, expected %u!\n",
-		       __func__, unbound, 0);
-		return -EINVAL;
-	}
-
-	if (bound != count) {
-		pr_err("%s: Found %lu objects bound, expected %lu!\n",
-		       __func__, bound, count);
-		return -EINVAL;
-	}
 
 	if (list_empty(&ggtt->vm.bound_list)) {
 		pr_err("No objects on the GGTT inactive list!\n");
@@ -198,8 +174,8 @@ static int igt_overcommit(void *arg)
 	quirk_add(obj, &objects);
 
 	vma = i915_gem_object_ggtt_pin(obj, NULL, 0, 0, 0);
-	if (!IS_ERR(vma) || PTR_ERR(vma) != -ENOSPC) {
-		pr_err("Failed to evict+insert, i915_gem_object_ggtt_pin returned err=%d\n", (int)PTR_ERR(vma));
+	if (vma != ERR_PTR(-ENOSPC)) {
+		pr_err("Failed to evict+insert, i915_gem_object_ggtt_pin returned err=%d\n", (int)PTR_ERR_OR_ZERO(vma));
 		err = -EINVAL;
 		goto cleanup;
 	}
@@ -466,7 +442,7 @@ static int igt_evict_contexts(void *arg)
 	/* Overfill the GGTT with context objects and so try to evict one. */
 	for_each_engine(engine, gt, id) {
 		struct i915_sw_fence fence;
-		struct drm_file *file;
+		struct file *file;
 
 		file = mock_file(i915);
 		if (IS_ERR(file)) {
@@ -515,7 +491,7 @@ static int igt_evict_contexts(void *arg)
 		pr_info("Submitted %lu contexts/requests on %s\n",
 			count, engine->name);
 
-		mock_file_free(i915, file);
+		fput(file);
 		if (err)
 			break;
 	}

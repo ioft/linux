@@ -2,7 +2,7 @@
 #define DEF_RDMAVT_INCQP_H
 
 /*
- * Copyright(c) 2016 - 2019 Intel Corporation.
+ * Copyright(c) 2016 - 2020 Intel Corporation.
  *
  * This file is provided under a dual BSD/GPLv2 license.  When using or
  * redistributing this file, you may do so under either license.
@@ -67,6 +67,33 @@
 #define RVT_R_RSP_NAK   0x04
 #define RVT_R_RSP_SEND  0x08
 #define RVT_R_COMM_EST  0x10
+
+/*
+ * If a packet's QP[23:16] bits match this value, then it is
+ * a PSM packet and the hardware will expect a KDETH header
+ * following the BTH.
+ */
+#define RVT_KDETH_QP_PREFIX       0x80
+#define RVT_KDETH_QP_SUFFIX       0xffff
+#define RVT_KDETH_QP_PREFIX_MASK  0x00ff0000
+#define RVT_KDETH_QP_PREFIX_SHIFT 16
+#define RVT_KDETH_QP_BASE         (u32)(RVT_KDETH_QP_PREFIX << \
+					RVT_KDETH_QP_PREFIX_SHIFT)
+#define RVT_KDETH_QP_MAX          (u32)(RVT_KDETH_QP_BASE + RVT_KDETH_QP_SUFFIX)
+
+/*
+ * If a packet's LNH == BTH and DEST QPN[23:16] in the BTH match this
+ * prefix value, then it is an AIP packet with a DETH containing the entropy
+ * value in byte 4 following the BTH.
+ */
+#define RVT_AIP_QP_PREFIX       0x81
+#define RVT_AIP_QP_SUFFIX       0xffff
+#define RVT_AIP_QP_PREFIX_MASK  0x00ff0000
+#define RVT_AIP_QP_PREFIX_SHIFT 16
+#define RVT_AIP_QP_BASE         (u32)(RVT_AIP_QP_PREFIX << \
+				      RVT_AIP_QP_PREFIX_SHIFT)
+#define RVT_AIP_QPN_MAX         BIT(RVT_AIP_QP_PREFIX_SHIFT)
+#define RVT_AIP_QP_MAX          (u32)(RVT_AIP_QP_BASE + RVT_AIP_QPN_MAX - 1)
 
 /*
  * Bit definitions for s_flags.
@@ -191,7 +218,7 @@ struct rvt_swqe {
 	u32 ssn;                /* send sequence number */
 	u32 length;             /* total length of data in sg_list */
 	void *priv;             /* driver dependent field */
-	struct rvt_sge sg_list[0];
+	struct rvt_sge sg_list[];
 };
 
 /**
@@ -277,6 +304,25 @@ struct rvt_rq {
 	/* protect changes in this struct */
 	spinlock_t lock ____cacheline_aligned_in_smp;
 };
+
+/**
+ * rvt_get_rq_count - count numbers of request work queue entries
+ * in circular buffer
+ * @rq: data structure for request queue entry
+ * @head: head indices of the circular buffer
+ * @tail: tail indices of the circular buffer
+ *
+ * Return - total number of entries in the Receive Queue
+ */
+
+static inline u32 rvt_get_rq_count(struct rvt_rq *rq, u32 head, u32 tail)
+{
+	u32 count = head - tail;
+
+	if ((s32)count < 0)
+		count += rq->size;
+	return count;
+}
 
 /*
  * This structure holds the information that the send tasklet needs
@@ -440,7 +486,7 @@ struct rvt_qp {
 	/*
 	 * This sge list MUST be last. Do not add anything below here.
 	 */
-	struct rvt_sge r_sg_list[0] /* verified SGEs */
+	struct rvt_sge r_sg_list[] /* verified SGEs */
 		____cacheline_aligned_in_smp;
 };
 
@@ -640,34 +686,14 @@ static inline int rvt_cmp_msn(u32 a, u32 b)
 	return (((int)a) - ((int)b)) << 8;
 }
 
-/**
- * rvt_compute_aeth - compute the AETH (syndrome + MSN)
- * @qp: the queue pair to compute the AETH for
- *
- * Returns the AETH.
- */
 __be32 rvt_compute_aeth(struct rvt_qp *qp);
 
-/**
- * rvt_get_credit - flush the send work queue of a QP
- * @qp: the qp who's send work queue to flush
- * @aeth: the Acknowledge Extended Transport Header
- *
- * The QP s_lock should be held.
- */
 void rvt_get_credit(struct rvt_qp *qp, u32 aeth);
 
-/**
- * rvt_restart_sge - rewind the sge state for a wqe
- * @ss: the sge state pointer
- * @wqe: the wqe to rewind
- * @len: the data length from the start of the wqe in bytes
- *
- * Returns the remaining data length.
- */
 u32 rvt_restart_sge(struct rvt_sge_state *ss, struct rvt_swqe *wqe, u32 len);
 
 /**
+ * rvt_div_round_up_mtu - round up divide
  * @qp - the qp pair
  * @len - the length
  *

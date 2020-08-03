@@ -12,8 +12,8 @@
 #include <linux/pkt_cls.h>
 #include <linux/tcp.h>
 #include <sys/socket.h>
-#include "bpf_helpers.h"
-#include "bpf_endian.h"
+#include <bpf/bpf_helpers.h>
+#include <bpf/bpf_endian.h>
 
 int _version SEC("version") = 1;
 char _license[] SEC("license") = "GPL";
@@ -73,6 +73,7 @@ int bpf_sk_lookup_test0(struct __sk_buff *skb)
 
 	tuple_len = ipv4 ? sizeof(tuple->ipv4) : sizeof(tuple->ipv6);
 	sk = bpf_sk_lookup_tcp(skb, tuple, tuple_len, BPF_F_CURRENT_NETNS, 0);
+	bpf_printk("sk=%d\n", sk ? 1 : 0);
 	if (sk)
 		bpf_sk_release(sk);
 	return sk ? TC_ACT_OK : TC_ACT_UNSPEC;

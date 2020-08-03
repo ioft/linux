@@ -49,6 +49,12 @@
 #define IND_REG(index) \
 	(enc10->link_regs->index)
 
+#ifndef MAX
+#define MAX(X, Y) ((X) > (Y) ? (X) : (Y))
+#endif
+#ifndef MIN
+#define MIN(X, Y) ((X) < (Y) ? (X) : (Y))
+#endif
 
 static struct mpll_cfg dcn2_mpll_cfg[] = {
 	// RBR
@@ -168,10 +174,8 @@ static struct mpll_cfg dcn2_mpll_cfg[] = {
 void enc2_fec_set_enable(struct link_encoder *enc, bool enable)
 {
 	struct dcn10_link_encoder *enc10 = TO_DCN10_LINK_ENC(enc);
-#ifdef CONFIG_DRM_AMD_DC_DSC_SUPPORT
 	DC_LOG_DSC("%s FEC at link encoder inst %d",
 			enable ? "Enabling" : "Disabling", enc->id.enum_id);
-#endif
 	REG_UPDATE(DP_DPHY_CNTL, DPHY_FEC_EN, enable);
 }
 
@@ -192,7 +196,6 @@ bool enc2_fec_is_active(struct link_encoder *enc)
 	return (active != 0);
 }
 
-#ifdef CONFIG_DRM_AMD_DC_DSC_SUPPORT
 /* this function reads dsc related register fields to be logged later in dcn10_log_hw_state
  * into a dcn_dsc_state struct.
  */
@@ -203,8 +206,8 @@ void link_enc2_read_state(struct link_encoder *enc, struct link_enc_state *s)
 	REG_GET(DP_DPHY_CNTL, DPHY_FEC_EN, &s->dphy_fec_en);
 	REG_GET(DP_DPHY_CNTL, DPHY_FEC_READY_SHADOW, &s->dphy_fec_ready_shadow);
 	REG_GET(DP_DPHY_CNTL, DPHY_FEC_ACTIVE_STATUS, &s->dphy_fec_active_status);
+	REG_GET(DP_LINK_CNTL, DP_LINK_TRAINING_COMPLETE, &s->dp_link_training_complete);
 }
-#endif
 
 static bool update_cfg_data(
 		struct dcn10_link_encoder *enc10,
@@ -263,6 +266,38 @@ void dcn20_link_encoder_enable_dp_output(
 
 }
 
+void dcn20_link_encoder_get_max_link_cap(struct link_encoder *enc,
+	struct dc_link_settings *link_settings)
+{
+	struct dcn10_link_encoder *enc10 = TO_DCN10_LINK_ENC(enc);
+	uint32_t is_in_usb_c_dp4_mode = 0;
+
+	dcn10_link_encoder_get_max_link_cap(enc, link_settings);
+
+	/* in usb c dp2 mode, max lane count is 2 */
+	if (enc->funcs->is_in_alt_mode && enc->funcs->is_in_alt_mode(enc)) {
+		REG_GET(RDPCSTX_PHY_CNTL6, RDPCS_PHY_DPALT_DP4, &is_in_usb_c_dp4_mode);
+		if (!is_in_usb_c_dp4_mode)
+			link_settings->lane_count = MIN(LANE_COUNT_TWO, link_settings->lane_count);
+	}
+
+}
+
+bool dcn20_link_encoder_is_in_alt_mode(struct link_encoder *enc)
+{
+	struct dcn10_link_encoder *enc10 = TO_DCN10_LINK_ENC(enc);
+	uint32_t dp_alt_mode_disable = 0;
+	bool is_usb_c_alt_mode = false;
+
+	if (enc->features.flags.bits.DP_IS_USB_C) {
+		/* if value == 1 alt mode is disabled, otherwise it is enabled */
+		REG_GET(RDPCSTX_PHY_CNTL6, RDPCS_PHY_DPALT_DISABLE, &dp_alt_mode_disable);
+		is_usb_c_alt_mode = (dp_alt_mode_disable == 0);
+	}
+
+	return is_usb_c_alt_mode;
+}
+
 #define AUX_REG(reg)\
 	(enc10->aux_regs->reg)
 
@@ -315,9 +350,7 @@ void enc2_hw_init(struct link_encoder *enc)
 }
 
 static const struct link_encoder_funcs dcn20_link_enc_funcs = {
-#ifdef CONFIG_DRM_AMD_DC_DSC_SUPPORT
 	.read_state = link_enc2_read_state,
-#endif
 	.validate_output_with_stream =
 		dcn10_link_encoder_validate_output_with_stream,
 	.hw_init = enc2_hw_init,
@@ -343,6 +376,8 @@ static const struct link_encoder_funcs dcn20_link_enc_funcs = {
 	.fec_is_active = enc2_fec_is_active,
 	.get_dig_mode = dcn10_get_dig_mode,
 	.get_dig_frontend = dcn10_get_dig_frontend,
+	.is_in_alt_mode = dcn20_link_encoder_is_in_alt_mode,
+	.get_max_link_cap = dcn20_link_encoder_get_max_link_cap,
 };
 
 void dcn20_link_encoder_construct(

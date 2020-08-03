@@ -36,14 +36,14 @@ static int utimes_common(const struct path *path, struct timespec64 *times)
 		if (times[0].tv_nsec == UTIME_OMIT)
 			newattrs.ia_valid &= ~ATTR_ATIME;
 		else if (times[0].tv_nsec != UTIME_NOW) {
-			newattrs.ia_atime = timestamp_truncate(times[0], inode);
+			newattrs.ia_atime = times[0];
 			newattrs.ia_valid |= ATTR_ATIME_SET;
 		}
 
 		if (times[1].tv_nsec == UTIME_OMIT)
 			newattrs.ia_valid &= ~ATTR_MTIME;
 		else if (times[1].tv_nsec != UTIME_NOW) {
-			newattrs.ia_mtime = timestamp_truncate(times[1], inode);
+			newattrs.ia_mtime = times[1];
 			newattrs.ia_valid |= ATTR_MTIME_SET;
 		}
 		/*
@@ -95,13 +95,13 @@ long do_utimes(int dfd, const char __user *filename, struct timespec64 *times,
 		goto out;
 	}
 
-	if (flags & ~AT_SYMLINK_NOFOLLOW)
+	if (flags & ~(AT_SYMLINK_NOFOLLOW | AT_EMPTY_PATH))
 		goto out;
 
 	if (filename == NULL && dfd != AT_FDCWD) {
 		struct fd f;
 
-		if (flags & AT_SYMLINK_NOFOLLOW)
+		if (flags)
 			goto out;
 
 		f = fdget(dfd);
@@ -117,6 +117,8 @@ long do_utimes(int dfd, const char __user *filename, struct timespec64 *times,
 
 		if (!(flags & AT_SYMLINK_NOFOLLOW))
 			lookup_flags |= LOOKUP_FOLLOW;
+		if (flags & AT_EMPTY_PATH)
+			lookup_flags |= LOOKUP_EMPTY;
 retry:
 		error = user_path_at(dfd, filename, lookup_flags, &path);
 		if (error)

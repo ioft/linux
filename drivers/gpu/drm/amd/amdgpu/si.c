@@ -1197,6 +1197,11 @@ static int si_asic_reset(struct amdgpu_device *adev)
 	return 0;
 }
 
+static bool si_asic_supports_baco(struct amdgpu_device *adev)
+{
+	return false;
+}
+
 static enum amd_reset_method
 si_asic_reset_method(struct amdgpu_device *adev)
 {
@@ -1242,12 +1247,6 @@ static u32 si_get_xclk(struct amdgpu_device *adev)
 static int si_set_uvd_clocks(struct amdgpu_device *adev, u32 vclk, u32 dclk)
 {
 	return 0;
-}
-
-static void si_detect_hw_virtualization(struct amdgpu_device *adev)
-{
-	if (is_virtual_machine()) /* passthrough mode */
-		adev->virt.caps |= AMDGPU_PASSTHROUGH_MODE;
 }
 
 static void si_flush_hdp(struct amdgpu_device *adev, struct amdgpu_ring *ring)
@@ -1425,6 +1424,7 @@ static const struct amdgpu_asic_funcs si_asic_funcs =
 	.get_pcie_usage = &si_get_pcie_usage,
 	.need_reset_on_init = &si_need_reset_on_init,
 	.get_pcie_replay_count = &si_get_pcie_replay_count,
+	.supports_baco = &si_asic_supports_baco,
 };
 
 static uint32_t si_get_rev_id(struct amdgpu_device *adev)
@@ -2159,8 +2159,6 @@ static const struct amdgpu_ip_block_version si_common_ip_block =
 
 int si_set_ip_blocks(struct amdgpu_device *adev)
 {
-	si_detect_hw_virtualization(adev);
-
 	switch (adev->asic_type) {
 	case CHIP_VERDE:
 	case CHIP_TAHITI:

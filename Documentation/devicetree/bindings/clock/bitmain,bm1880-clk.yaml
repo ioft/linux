@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
 %YAML 1.2
 ---
-$id: http://devicetree.org/schemas/bindings/clock/bitmain,bm1880-clk.yaml#
+$id: http://devicetree.org/schemas/clock/bitmain,bm1880-clk.yaml#
 $schema: http://devicetree.org/meta-schemas/core.yaml#
 
 title: Bitmain BM1880 Clock Controller
@@ -65,7 +65,7 @@ examples:
   - |
     uart0: serial@58018000 {
          compatible = "snps,dw-apb-uart";
-         reg = <0x0 0x58018000 0x0 0x2000>;
+         reg = <0x58018000 0x2000>;
          clocks = <&clk 45>, <&clk 46>;
          clock-names = "baudclk", "apb_pclk";
          interrupts = <0 9 4>;

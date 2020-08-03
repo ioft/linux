@@ -5,10 +5,9 @@
  *
  * GPL LICENSE SUMMARY
  *
- * Copyright(c) 2012 - 2014 Intel Corporation. All rights reserved.
+ * Copyright(c) 2012 - 2014, 2018 - 2020 Intel Corporation. All rights reserved.
  * Copyright(c) 2013 - 2015 Intel Mobile Communications GmbH
  * Copyright(c) 2016 - 2017 Intel Deutschland GmbH
- * Copyright(c) 2018 - 2019 Intel Corporation
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of version 2 of the GNU General Public License as
@@ -28,10 +27,9 @@
  *
  * BSD LICENSE
  *
- * Copyright(c) 2012 - 2014 Intel Corporation. All rights reserved.
+ * Copyright(c) 2012 - 2014, 2018 - 2020 Intel Corporation. All rights reserved.
  * Copyright(c) 2013 - 2015 Intel Mobile Communications GmbH
  * Copyright(c) 2016 - 2017 Intel Deutschland GmbH
- * Copyright(c) 2018 - 2019 Intel Corporation
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -79,9 +77,6 @@ void iwl_mvm_set_rekey_data(struct ieee80211_hw *hw,
 {
 	struct iwl_mvm *mvm = IWL_MAC80211_GET_MVM(hw);
 	struct iwl_mvm_vif *mvmvif = iwl_mvm_vif_from_mac80211(vif);
-
-	if (iwlwifi_mod_params.swcrypto)
-		return;
 
 	mutex_lock(&mvm->mutex);
 
@@ -843,18 +838,16 @@ iwl_mvm_wowlan_config(struct iwl_mvm *mvm,
 			return ret;
 	}
 
-	if (!iwlwifi_mod_params.swcrypto) {
-		/*
-		 * This needs to be unlocked due to lock ordering
-		 * constraints. Since we're in the suspend path
-		 * that isn't really a problem though.
-		 */
-		mutex_unlock(&mvm->mutex);
-		ret = iwl_mvm_wowlan_config_key_params(mvm, vif, CMD_ASYNC);
-		mutex_lock(&mvm->mutex);
-		if (ret)
-			return ret;
-	}
+	/*
+	 * This needs to be unlocked due to lock ordering
+	 * constraints. Since we're in the suspend path
+	 * that isn't really a problem though.
+	 */
+	mutex_unlock(&mvm->mutex);
+	ret = iwl_mvm_wowlan_config_key_params(mvm, vif, CMD_ASYNC);
+	mutex_lock(&mvm->mutex);
+	if (ret)
+		return ret;
 
 	ret = iwl_mvm_send_cmd_pdu(mvm, WOWLAN_CONFIGURATION, 0,
 				   sizeof(*wowlan_config_cmd),
@@ -989,6 +982,8 @@ static int __iwl_mvm_suspend(struct ieee80211_hw *hw,
 
 	mutex_lock(&mvm->mutex);
 
+	set_bit(IWL_MVM_STATUS_IN_D3, &mvm->status);
+
 	vif = iwl_mvm_get_bss_vif(mvm);
 	if (IS_ERR_OR_NULL(vif)) {
 		ret = 1;
@@ -1083,6 +1078,8 @@ static int __iwl_mvm_suspend(struct ieee80211_hw *hw,
 				ieee80211_restart_hw(mvm->hw);
 			}
 		}
+
+		clear_bit(IWL_MVM_STATUS_IN_D3, &mvm->status);
 	}
  out_noreset:
 	mutex_unlock(&mvm->mutex);
@@ -1513,12 +1510,14 @@ out:
 
 struct iwl_wowlan_status *iwl_mvm_send_wowlan_get_status(struct iwl_mvm *mvm)
 {
-	struct iwl_wowlan_status *v7, *status;
+	struct iwl_wowlan_status_v7 *v7;
+	struct iwl_wowlan_status *status;
 	struct iwl_host_cmd cmd = {
 		.id = WOWLAN_GET_STATUSES,
 		.flags = CMD_WANT_SKB,
 	};
-	int ret, len, status_size;
+	int ret, len, status_size, data_size;
+	u8 notif_ver;
 
 	lockdep_assert_held(&mvm->mutex);
 
@@ -1528,13 +1527,12 @@ struct iwl_wowlan_status *iwl_mvm_send_wowlan_get_status(struct iwl_mvm *mvm)
 		return ERR_PTR(ret);
 	}
 
+	len = iwl_rx_packet_payload_len(cmd.resp_pkt);
 	if (!fw_has_api(&mvm->fw->ucode_capa,
 			IWL_UCODE_TLV_API_WOWLAN_KEY_MATERIAL)) {
 		struct iwl_wowlan_status_v6 *v6 = (void *)cmd.resp_pkt->data;
-		int data_size;
 
 		status_size = sizeof(*v6);
-		len = iwl_rx_packet_payload_len(cmd.resp_pkt);
 
 		if (len < status_size) {
 			IWL_ERR(mvm, "Invalid WoWLAN status response!\n");
@@ -1589,23 +1587,33 @@ struct iwl_wowlan_status *iwl_mvm_send_wowlan_get_status(struct iwl_mvm *mvm)
 	}
 
 	v7 = (void *)cmd.resp_pkt->data;
-	status_size = sizeof(*v7);
-	len = iwl_rx_packet_payload_len(cmd.resp_pkt);
+	notif_ver = iwl_fw_lookup_notif_ver(mvm->fw, LEGACY_GROUP,
+					    WOWLAN_GET_STATUSES, 0);
+
+	status_size = sizeof(*status);
+
+	if (notif_ver == IWL_FW_CMD_VER_UNKNOWN || notif_ver < 9)
+		status_size = sizeof(*v7);
 
 	if (len < status_size) {
 		IWL_ERR(mvm, "Invalid WoWLAN status response!\n");
 		status = ERR_PTR(-EIO);
 		goto out_free_resp;
 	}
+	data_size = ALIGN(le32_to_cpu(v7->wake_packet_bufsize), 4);
 
-	if (len != (status_size +
-		    ALIGN(le32_to_cpu(v7->wake_packet_bufsize), 4))) {
+	if (len != (status_size + data_size)) {
 		IWL_ERR(mvm, "Invalid WoWLAN status response!\n");
 		status = ERR_PTR(-EIO);
 		goto out_free_resp;
 	}
 
-	status = kmemdup(v7, len, GFP_KERNEL);
+	status = kzalloc(sizeof(*status) + data_size, GFP_KERNEL);
+	if (!status)
+		goto out_free_resp;
+
+	memcpy(status, v7, status_size);
+	memcpy(status->wake_packet, (u8 *)v7 + status_size, data_size);
 
 out_free_resp:
 	iwl_free_resp(&cmd);
@@ -1705,6 +1713,7 @@ iwl_mvm_netdetect_query_results(struct iwl_mvm *mvm,
 	};
 	int ret, len;
 	size_t query_len, matches_len;
+	int max_profiles = iwl_umac_scan_get_max_profiles(mvm->fw);
 
 	ret = iwl_mvm_send_cmd(mvm, &cmd);
 	if (ret) {
@@ -1716,11 +1725,11 @@ iwl_mvm_netdetect_query_results(struct iwl_mvm *mvm,
 		       IWL_UCODE_TLV_API_SCAN_OFFLOAD_CHANS)) {
 		query_len = sizeof(struct iwl_scan_offload_profiles_query);
 		matches_len = sizeof(struct iwl_scan_offload_profile_match) *
-			IWL_SCAN_MAX_PROFILES;
+			max_profiles;
 	} else {
 		query_len = sizeof(struct iwl_scan_offload_profiles_query_v1);
 		matches_len = sizeof(struct iwl_scan_offload_profile_match_v1) *
-			IWL_SCAN_MAX_PROFILES;
+			max_profiles;
 	}
 
 	len = iwl_rx_packet_payload_len(cmd.resp_pkt);
@@ -1893,27 +1902,55 @@ static void iwl_mvm_d3_disconnect_iter(void *data, u8 *mac,
 		ieee80211_resume_disconnect(vif);
 }
 
-static int iwl_mvm_check_rt_status(struct iwl_mvm *mvm,
-				   struct ieee80211_vif *vif)
+static bool iwl_mvm_rt_status(struct iwl_trans *trans, u32 base, u32 *err_id)
 {
-	u32 base = mvm->trans->dbg.lmac_error_event_table[0];
 	struct error_table_start {
 		/* cf. struct iwl_error_event_table */
 		u32 valid;
-		u32 error_id;
+		__le32 err_id;
 	} err_info;
 
-	iwl_trans_read_mem_bytes(mvm->trans, base,
-				 &err_info, sizeof(err_info));
+	if (!base)
+		return false;
 
-	if (err_info.valid &&
-	    err_info.error_id == RF_KILL_INDICATOR_FOR_WOWLAN) {
-		struct cfg80211_wowlan_wakeup wakeup = {
-			.rfkill_release = true,
-		};
-		ieee80211_report_wowlan_wakeup(vif, &wakeup, GFP_KERNEL);
+	iwl_trans_read_mem_bytes(trans, base,
+				 &err_info, sizeof(err_info));
+	if (err_info.valid && err_id)
+		*err_id = le32_to_cpu(err_info.err_id);
+
+	return !!err_info.valid;
+}
+
+static bool iwl_mvm_check_rt_status(struct iwl_mvm *mvm,
+				   struct ieee80211_vif *vif)
+{
+	u32 err_id;
+
+	/* check for lmac1 error */
+	if (iwl_mvm_rt_status(mvm->trans,
+			      mvm->trans->dbg.lmac_error_event_table[0],
+			      &err_id)) {
+		if (err_id == RF_KILL_INDICATOR_FOR_WOWLAN) {
+			struct cfg80211_wowlan_wakeup wakeup = {
+				.rfkill_release = true,
+			};
+			ieee80211_report_wowlan_wakeup(vif, &wakeup,
+						       GFP_KERNEL);
+		}
+		return true;
 	}
-	return err_info.valid;
+
+	/* check if we have lmac2 set and check for error */
+	if (iwl_mvm_rt_status(mvm->trans,
+			      mvm->trans->dbg.lmac_error_event_table[1], NULL))
+		return true;
+
+	/* check for umac error */
+	if (iwl_mvm_rt_status(mvm->trans,
+			      mvm->trans->dbg.umac_error_event_table, NULL))
+		return true;
+
+	return false;
 }
 
 static int __iwl_mvm_resume(struct iwl_mvm *mvm, bool test)
@@ -1928,6 +1965,8 @@ static int __iwl_mvm_resume(struct iwl_mvm *mvm, bool test)
 				      IWL_UCODE_TLV_CAPA_D0I3_END_FIRST);
 
 	mutex_lock(&mvm->mutex);
+
+	clear_bit(IWL_MVM_STATUS_IN_D3, &mvm->status);
 
 	/* get the BSS vif pointer again */
 	vif = iwl_mvm_get_bss_vif(mvm);
@@ -1946,6 +1985,9 @@ static int __iwl_mvm_resume(struct iwl_mvm *mvm, bool test)
 		ret = 1;
 		goto err;
 	}
+
+	iwl_dbg_tlv_time_point(&mvm->fwrt, IWL_FW_INI_TIME_POINT_HOST_D3_END,
+			       NULL);
 
 	ret = iwl_trans_d3_resume(mvm->trans, &d3_status, test, !unified_image);
 	if (ret)

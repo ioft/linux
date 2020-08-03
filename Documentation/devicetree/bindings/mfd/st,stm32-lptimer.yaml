@@ -39,6 +39,8 @@ properties:
   "#size-cells":
     const: 0
 
+  wakeup-source: true
+
   pwm:
     type: object
 
@@ -64,8 +66,8 @@ patternProperties:
       reg:
         description: Identify trigger hardware block.
         items:
-         minimum: 0
-         maximum: 2
+          minimum: 0
+          maximum: 2
 
     required:
       - compatible
@@ -77,6 +79,16 @@ patternProperties:
     properties:
       compatible:
         const: st,stm32-lptimer-counter
+
+    required:
+      - compatible
+
+  timer:
+    type: object
+
+    properties:
+      compatible:
+        const: st,stm32-lptimer-timer
 
     required:
       - compatible
@@ -114,6 +126,10 @@ examples:
 
       counter {
         compatible = "st,stm32-lptimer-counter";
+      };
+
+      timer {
+        compatible = "st,stm32-lptimer-timer";
       };
     };
 

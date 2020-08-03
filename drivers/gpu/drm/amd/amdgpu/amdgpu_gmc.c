@@ -136,8 +136,8 @@ uint64_t amdgpu_gmc_agp_addr(struct ttm_buffer_object *bo)
 /**
  * amdgpu_gmc_vram_location - try to find VRAM location
  *
- * @adev: amdgpu device structure holding all necessary informations
- * @mc: memory controller structure holding memory informations
+ * @adev: amdgpu device structure holding all necessary information
+ * @mc: memory controller structure holding memory information
  * @base: base address at which to put VRAM
  *
  * Function will try to place VRAM at base address provided
@@ -165,8 +165,8 @@ void amdgpu_gmc_vram_location(struct amdgpu_device *adev, struct amdgpu_gmc *mc,
 /**
  * amdgpu_gmc_gart_location - try to find GART location
  *
- * @adev: amdgpu device structure holding all necessary informations
- * @mc: memory controller structure holding memory informations
+ * @adev: amdgpu device structure holding all necessary information
+ * @mc: memory controller structure holding memory information
  *
  * Function will place try to place GART before or after VRAM.
  *
@@ -207,8 +207,8 @@ void amdgpu_gmc_gart_location(struct amdgpu_device *adev, struct amdgpu_gmc *mc)
 
 /**
  * amdgpu_gmc_agp_location - try to find AGP location
- * @adev: amdgpu device structure holding all necessary informations
- * @mc: memory controller structure holding memory informations
+ * @adev: amdgpu device structure holding all necessary information
+ * @mc: memory controller structure holding memory information
  *
  * Function will place try to find a place for the AGP BAR in the MC address
  * space.
@@ -223,7 +223,7 @@ void amdgpu_gmc_agp_location(struct amdgpu_device *adev, struct amdgpu_gmc *mc)
 	u64 size_af, size_bf;
 
 	if (amdgpu_sriov_vf(adev)) {
-		mc->agp_start = 0xffffffff;
+		mc->agp_start = 0xffffffffffff;
 		mc->agp_end = 0x0;
 		mc->agp_size = 0;
 
@@ -332,4 +332,79 @@ void amdgpu_gmc_ras_fini(struct amdgpu_device *adev)
 	amdgpu_umc_ras_fini(adev);
 	amdgpu_mmhub_ras_fini(adev);
 	amdgpu_xgmi_ras_fini(adev);
+}
+
+	/*
+	 * The latest engine allocation on gfx9/10 is:
+	 * Engine 2, 3: firmware
+	 * Engine 0, 1, 4~16: amdgpu ring,
+	 *                    subject to change when ring number changes
+	 * Engine 17: Gart flushes
+	 */
+#define GFXHUB_FREE_VM_INV_ENGS_BITMAP		0x1FFF3
+#define MMHUB_FREE_VM_INV_ENGS_BITMAP		0x1FFF3
+
+int amdgpu_gmc_allocate_vm_inv_eng(struct amdgpu_device *adev)
+{
+	struct amdgpu_ring *ring;
+	unsigned vm_inv_engs[AMDGPU_MAX_VMHUBS] =
+		{GFXHUB_FREE_VM_INV_ENGS_BITMAP, MMHUB_FREE_VM_INV_ENGS_BITMAP,
+		GFXHUB_FREE_VM_INV_ENGS_BITMAP};
+	unsigned i;
+	unsigned vmhub, inv_eng;
+
+	for (i = 0; i < adev->num_rings; ++i) {
+		ring = adev->rings[i];
+		vmhub = ring->funcs->vmhub;
+
+		inv_eng = ffs(vm_inv_engs[vmhub]);
+		if (!inv_eng) {
+			dev_err(adev->dev, "no VM inv eng for ring %s\n",
+				ring->name);
+			return -EINVAL;
+		}
+
+		ring->vm_inv_eng = inv_eng - 1;
+		vm_inv_engs[vmhub] &= ~(1 << ring->vm_inv_eng);
+
+		dev_info(adev->dev, "ring %s uses VM inv eng %u on hub %u\n",
+			 ring->name, ring->vm_inv_eng, ring->funcs->vmhub);
+	}
+
+	return 0;
+}
+
+/**
+ * amdgpu_tmz_set -- check and set if a device supports TMZ
+ * @adev: amdgpu_device pointer
+ *
+ * Check and set if an the device @adev supports Trusted Memory
+ * Zones (TMZ).
+ */
+void amdgpu_gmc_tmz_set(struct amdgpu_device *adev)
+{
+	switch (adev->asic_type) {
+	case CHIP_RAVEN:
+	case CHIP_RENOIR:
+	case CHIP_NAVI10:
+	case CHIP_NAVI14:
+	case CHIP_NAVI12:
+		/* Don't enable it by default yet.
+		 */
+		if (amdgpu_tmz < 1) {
+			adev->gmc.tmz_enabled = false;
+			dev_info(adev->dev,
+				 "Trusted Memory Zone (TMZ) feature disabled as experimental (default)\n");
+		} else {
+			adev->gmc.tmz_enabled = true;
+			dev_info(adev->dev,
+				 "Trusted Memory Zone (TMZ) feature enabled as experimental (cmd line)\n");
+		}
+		break;
+	default:
+		adev->gmc.tmz_enabled = false;
+		dev_warn(adev->dev,
+			 "Trusted Memory Zone (TMZ) feature not supported\n");
+		break;
+	}
 }

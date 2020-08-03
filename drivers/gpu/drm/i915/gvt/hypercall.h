@@ -33,6 +33,10 @@
 #ifndef _GVT_HYPERCALL_H_
 #define _GVT_HYPERCALL_H_
 
+#include <linux/types.h>
+
+struct device;
+
 enum hypervisor_type {
 	INTEL_GVT_HYPERVISOR_XEN = 0,
 	INTEL_GVT_HYPERVISOR_KVM,
@@ -74,7 +78,5 @@ struct intel_gvt_mpt {
 	void (*put_vfio_device)(void *vgpu);
 	bool (*is_valid_gfn)(unsigned long handle, unsigned long gfn);
 };
-
-extern struct intel_gvt_mpt xengt_mpt;
 
 #endif /* _GVT_HYPERCALL_H_ */

@@ -155,9 +155,9 @@ static void sf_pdma_free_chan_resources(struct dma_chan *dchan)
 	kfree(chan->desc);
 	chan->desc = NULL;
 	vchan_get_all_descriptors(&chan->vchan, &head);
-	vchan_dma_desc_free_list(&chan->vchan, &head);
 	sf_pdma_disclaim_chan(chan);
 	spin_unlock_irqrestore(&chan->vchan.lock, flags);
+	vchan_dma_desc_free_list(&chan->vchan, &head);
 }
 
 static size_t sf_pdma_desc_residue(struct sf_pdma_chan *chan,
@@ -220,8 +220,8 @@ static int sf_pdma_terminate_all(struct dma_chan *dchan)
 	chan->desc = NULL;
 	chan->xfer_err = false;
 	vchan_get_all_descriptors(&chan->vchan, &head);
-	vchan_dma_desc_free_list(&chan->vchan, &head);
 	spin_unlock_irqrestore(&chan->vchan.lock, flags);
+	vchan_dma_desc_free_list(&chan->vchan, &head);
 
 	return 0;
 }
@@ -506,11 +506,11 @@ static int sf_pdma_probe(struct platform_device *pdev)
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	pdma->membase = devm_ioremap_resource(&pdev->dev, res);
 	if (IS_ERR(pdma->membase))
-		goto ERR_MEMBASE;
+		return PTR_ERR(pdma->membase);
 
 	ret = sf_pdma_irq_init(pdev, pdma);
 	if (ret)
-		goto ERR_INITIRQ;
+		return ret;
 
 	sf_pdma_setup_chans(pdma);
 
@@ -544,24 +544,13 @@ static int sf_pdma_probe(struct platform_device *pdev)
 			 "Failed to set DMA mask. Fall back to default.\n");
 
 	ret = dma_async_device_register(&pdma->dma_dev);
-	if (ret)
-		goto ERR_REG_DMADEVICE;
+	if (ret) {
+		dev_err(&pdev->dev,
+			"Can't register SiFive Platform DMA. (%d)\n", ret);
+		return ret;
+	}
 
 	return 0;
-
-ERR_MEMBASE:
-	devm_kfree(&pdev->dev, pdma);
-	return PTR_ERR(pdma->membase);
-
-ERR_INITIRQ:
-	devm_kfree(&pdev->dev, pdma);
-	return ret;
-
-ERR_REG_DMADEVICE:
-	devm_kfree(&pdev->dev, pdma);
-	dev_err(&pdev->dev,
-		"Can't register SiFive Platform DMA. (%d)\n", ret);
-	return ret;
 }
 
 static int sf_pdma_remove(struct platform_device *pdev)

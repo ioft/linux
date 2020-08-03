@@ -54,6 +54,16 @@ properties:
 
       - description: RZ/G1H (R8A77420)
         items:
+          - enum:
+              # iWave Systems RZ/G1H Qseven System On Module (iW-RainboW-G21M-Qseven)
+              - iwave,g21m
+          - const: renesas,r8a7742
+
+      - items:
+          - enum:
+              # iWave Systems RZ/G1H Qseven Development Platform (iW-RainboW-G21D-Qseven)
+              - iwave,g21d
+          - const: iwave,g21m
           - const: renesas,r8a7742
 
       - description: RZ/G1M (R8A77430)
@@ -208,6 +218,7 @@ properties:
       - description: R-Car M3-W+ (R8A77961)
         items:
           - enum:
+              - renesas,m3ulcb # M3ULCB (R-Car Starter Kit Pro, RTP8J77961ASKB0SK0SA05A (M3 ES3.0))
               - renesas,salvator-xs # Salvator-XS (Salvator-X 2nd version, RTP0RC7796SIPB0012SA5A)
           - const: renesas,r8a77961
 

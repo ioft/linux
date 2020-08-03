@@ -18,13 +18,13 @@
 #include "secure_link.h"
 #include "hif_api_cmd.h"
 
-static int hif_generic_confirm(struct wfx_dev *wdev, struct hif_msg *hif,
-			       void *buf)
+static int hif_generic_confirm(struct wfx_dev *wdev,
+			       const struct hif_msg *hif, const void *buf)
 {
 	// All confirm messages start with status
-	int status = le32_to_cpu(*((__le32 *) buf));
+	int status = le32_to_cpup((__le32 *)buf);
 	int cmd = hif->id;
-	int len = hif->len - 4; // drop header
+	int len = le16_to_cpu(hif->len) - 4; // drop header
 
 	WARN(!mutex_is_locked(&wdev->hif_cmd.lock), "data locking error");
 
@@ -59,9 +59,10 @@ static int hif_generic_confirm(struct wfx_dev *wdev, struct hif_msg *hif,
 	return status;
 }
 
-static int hif_tx_confirm(struct wfx_dev *wdev, struct hif_msg *hif, void *buf)
+static int hif_tx_confirm(struct wfx_dev *wdev,
+			  const struct hif_msg *hif, const void *buf)
 {
-	struct hif_cnf_tx *body = buf;
+	const struct hif_cnf_tx *body = buf;
 	struct wfx_vif *wvif = wdev_to_wvif(wdev, hif->interface);
 
 	WARN_ON(!wvif);
@@ -72,48 +73,44 @@ static int hif_tx_confirm(struct wfx_dev *wdev, struct hif_msg *hif, void *buf)
 	return 0;
 }
 
-static int hif_multi_tx_confirm(struct wfx_dev *wdev, struct hif_msg *hif,
-				void *buf)
+static int hif_multi_tx_confirm(struct wfx_dev *wdev,
+				const struct hif_msg *hif, const void *buf)
 {
-	struct hif_cnf_multi_transmit *body = buf;
-	struct hif_cnf_tx *buf_loc = (struct hif_cnf_tx *) &body->tx_conf_payload;
+	const struct hif_cnf_multi_transmit *body = buf;
 	struct wfx_vif *wvif = wdev_to_wvif(wdev, hif->interface);
-	int count = body->num_tx_confs;
 	int i;
 
-	WARN(count <= 0, "corrupted message");
+	WARN(body->num_tx_confs <= 0, "corrupted message");
 	WARN_ON(!wvif);
 	if (!wvif)
 		return -EFAULT;
 
-	for (i = 0; i < count; ++i) {
-		wfx_tx_confirm_cb(wvif, buf_loc);
-		buf_loc++;
-	}
+	for (i = 0; i < body->num_tx_confs; i++)
+		wfx_tx_confirm_cb(wvif, &body->tx_conf_payload[i]);
 	return 0;
 }
 
-static int hif_startup_indication(struct wfx_dev *wdev, struct hif_msg *hif,
-				  void *buf)
+static int hif_startup_indication(struct wfx_dev *wdev,
+				  const struct hif_msg *hif, const void *buf)
 {
-	struct hif_ind_startup *body = buf;
+	const struct hif_ind_startup *body = buf;
 
 	if (body->status || body->firmware_type > 4) {
 		dev_err(wdev->dev, "received invalid startup indication");
 		return -EINVAL;
 	}
 	memcpy(&wdev->hw_caps, body, sizeof(struct hif_ind_startup));
-	le32_to_cpus(&wdev->hw_caps.status);
-	le16_to_cpus(&wdev->hw_caps.hardware_id);
-	le16_to_cpus(&wdev->hw_caps.num_inp_ch_bufs);
-	le16_to_cpus(&wdev->hw_caps.size_inp_ch_buf);
+	le16_to_cpus((__le16 *)&wdev->hw_caps.hardware_id);
+	le16_to_cpus((__le16 *)&wdev->hw_caps.num_inp_ch_bufs);
+	le16_to_cpus((__le16 *)&wdev->hw_caps.size_inp_ch_buf);
+	le32_to_cpus((__le32 *)&wdev->hw_caps.supported_rate_mask);
 
 	complete(&wdev->firmware_ready);
 	return 0;
 }
 
-static int hif_wakeup_indication(struct wfx_dev *wdev, struct hif_msg *hif,
-				 void *buf)
+static int hif_wakeup_indication(struct wfx_dev *wdev,
+				 const struct hif_msg *hif, const void *buf)
 {
 	if (!wdev->pdata.gpio_wakeup
 	    || !gpiod_get_value(wdev->pdata.gpio_wakeup)) {
@@ -123,25 +120,27 @@ static int hif_wakeup_indication(struct wfx_dev *wdev, struct hif_msg *hif,
 	return 0;
 }
 
-static int hif_keys_indication(struct wfx_dev *wdev, struct hif_msg *hif,
-			       void *buf)
+static int hif_keys_indication(struct wfx_dev *wdev,
+			       const struct hif_msg *hif, const void *buf)
 {
-	struct hif_ind_sl_exchange_pub_keys *body = buf;
+	const struct hif_ind_sl_exchange_pub_keys *body = buf;
+	u8 pubkey[API_NCP_PUB_KEY_SIZE];
 
-	// Compatibility with legacy secure link
-	if (body->status == SL_PUB_KEY_EXCHANGE_STATUS_SUCCESS)
-		body->status = 0;
-	if (body->status)
+	// SL_PUB_KEY_EXCHANGE_STATUS_SUCCESS is used by legacy secure link
+	if (body->status && body->status != HIF_STATUS_SLK_NEGO_SUCCESS)
 		dev_warn(wdev->dev, "secure link negociation error\n");
-	wfx_sl_check_pubkey(wdev, body->ncp_pub_key, body->ncp_pub_key_mac);
+	memcpy(pubkey, body->ncp_pub_key, sizeof(pubkey));
+	memreverse(pubkey, sizeof(pubkey));
+	wfx_sl_check_pubkey(wdev, pubkey, body->ncp_pub_key_mac);
 	return 0;
 }
 
-static int hif_receive_indication(struct wfx_dev *wdev, struct hif_msg *hif,
-				  void *buf, struct sk_buff *skb)
+static int hif_receive_indication(struct wfx_dev *wdev,
+				  const struct hif_msg *hif,
+				  const void *buf, struct sk_buff *skb)
 {
 	struct wfx_vif *wvif = wdev_to_wvif(wdev, hif->interface);
-	struct hif_ind_rx *body = buf;
+	const struct hif_ind_rx *body = buf;
 
 	if (!wvif) {
 		dev_warn(wdev->dev, "ignore rx data for non-existent vif %d\n",
@@ -154,36 +153,50 @@ static int hif_receive_indication(struct wfx_dev *wdev, struct hif_msg *hif,
 	return 0;
 }
 
-static int hif_event_indication(struct wfx_dev *wdev, struct hif_msg *hif,
-				void *buf)
+static int hif_event_indication(struct wfx_dev *wdev,
+				const struct hif_msg *hif, const void *buf)
 {
 	struct wfx_vif *wvif = wdev_to_wvif(wdev, hif->interface);
-	struct hif_ind_event *body = buf;
-	struct wfx_hif_event *event;
-	int first;
+	const struct hif_ind_event *body = buf;
+	int type = le32_to_cpu(body->event_id);
+	int cause;
 
-	WARN_ON(!wvif);
-	if (!wvif)
+	if (!wvif) {
+		dev_warn(wdev->dev, "received event for non-existent vif\n");
 		return 0;
+	}
 
-	event = kzalloc(sizeof(*event), GFP_KERNEL);
-	if (!event)
-		return -ENOMEM;
-
-	memcpy(&event->evt, body, sizeof(struct hif_ind_event));
-	spin_lock(&wvif->event_queue_lock);
-	first = list_empty(&wvif->event_queue);
-	list_add_tail(&event->link, &wvif->event_queue);
-	spin_unlock(&wvif->event_queue_lock);
-
-	if (first)
-		schedule_work(&wvif->event_handler_work);
-
+	switch (type) {
+	case HIF_EVENT_IND_RCPI_RSSI:
+		wfx_event_report_rssi(wvif, body->event_data.rcpi_rssi);
+		break;
+	case HIF_EVENT_IND_BSSLOST:
+		schedule_delayed_work(&wvif->beacon_loss_work, 0);
+		break;
+	case HIF_EVENT_IND_BSSREGAINED:
+		cancel_delayed_work(&wvif->beacon_loss_work);
+		dev_dbg(wdev->dev, "ignore BSSREGAINED indication\n");
+		break;
+	case HIF_EVENT_IND_PS_MODE_ERROR:
+		cause = le32_to_cpu(body->event_data.ps_mode_error);
+		dev_warn(wdev->dev, "error while processing power save request: %d\n",
+			 cause);
+		if (cause == HIF_PS_ERROR_AP_NOT_RESP_TO_POLL) {
+			wvif->bss_not_support_ps_poll = true;
+			schedule_work(&wvif->update_pm_work);
+		}
+		break;
+	default:
+		dev_warn(wdev->dev, "unhandled event indication: %.2x\n",
+			 type);
+		break;
+	}
 	return 0;
 }
 
 static int hif_pm_mode_complete_indication(struct wfx_dev *wdev,
-					   struct hif_msg *hif, void *buf)
+					   const struct hif_msg *hif,
+					   const void *buf)
 {
 	struct wfx_vif *wvif = wdev_to_wvif(wdev, hif->interface);
 
@@ -194,19 +207,20 @@ static int hif_pm_mode_complete_indication(struct wfx_dev *wdev,
 }
 
 static int hif_scan_complete_indication(struct wfx_dev *wdev,
-					struct hif_msg *hif, void *buf)
+					const struct hif_msg *hif,
+					const void *buf)
 {
 	struct wfx_vif *wvif = wdev_to_wvif(wdev, hif->interface);
-	struct hif_ind_scan_cmpl *body = buf;
 
 	WARN_ON(!wvif);
-	wfx_scan_complete_cb(wvif, body);
+	wfx_scan_complete(wvif);
 
 	return 0;
 }
 
 static int hif_join_complete_indication(struct wfx_dev *wdev,
-					struct hif_msg *hif, void *buf)
+					const struct hif_msg *hif,
+					const void *buf)
 {
 	struct wfx_vif *wvif = wdev_to_wvif(wdev, hif->interface);
 
@@ -217,68 +231,42 @@ static int hif_join_complete_indication(struct wfx_dev *wdev,
 }
 
 static int hif_suspend_resume_indication(struct wfx_dev *wdev,
-					 struct hif_msg *hif, void *buf)
+					 const struct hif_msg *hif,
+					 const void *buf)
 {
 	struct wfx_vif *wvif = wdev_to_wvif(wdev, hif->interface);
-	struct hif_ind_suspend_resume_tx *body = buf;
+	const struct hif_ind_suspend_resume_tx *body = buf;
 
-	WARN_ON(!wvif);
-	wfx_suspend_resume(wvif, body);
-
-	return 0;
-}
-
-static int hif_error_indication(struct wfx_dev *wdev, struct hif_msg *hif,
-				void *buf)
-{
-	struct hif_ind_error *body = buf;
-	u8 *pRollback = (u8 *) body->data;
-	u32 *pStatus = (u32 *) body->data;
-
-	switch (body->type) {
-	case HIF_ERROR_FIRMWARE_ROLLBACK:
-		dev_err(wdev->dev,
-			"asynchronous error: firmware rollback error %d\n",
-			*pRollback);
-		break;
-	case HIF_ERROR_FIRMWARE_DEBUG_ENABLED:
-		dev_err(wdev->dev, "asynchronous error: firmware debug feature enabled\n");
-		break;
-	case HIF_ERROR_OUTDATED_SESSION_KEY:
-		dev_err(wdev->dev, "asynchronous error: secure link outdated key: %#.8x\n",
-			*pStatus);
-		break;
-	case HIF_ERROR_INVALID_SESSION_KEY:
-		dev_err(wdev->dev, "asynchronous error: invalid session key\n");
-		break;
-	case HIF_ERROR_OOR_VOLTAGE:
-		dev_err(wdev->dev, "asynchronous error: out-of-range overvoltage: %#.8x\n",
-			*pStatus);
-		break;
-	case HIF_ERROR_PDS_VERSION:
-		dev_err(wdev->dev,
-			"asynchronous error: wrong PDS payload or version: %#.8x\n",
-			*pStatus);
-		break;
-	default:
-		dev_err(wdev->dev, "asynchronous error: unknown (%d)\n",
-			body->type);
-		break;
+	if (body->suspend_resume_flags.bc_mc_only) {
+		WARN_ON(!wvif);
+		if (body->suspend_resume_flags.resume)
+			wfx_suspend_resume_mc(wvif, STA_NOTIFY_AWAKE);
+		else
+			wfx_suspend_resume_mc(wvif, STA_NOTIFY_SLEEP);
+	} else {
+		WARN(body->peer_sta_set, "misunderstood indication");
+		WARN(hif->interface != 2, "misunderstood indication");
+		if (body->suspend_resume_flags.resume)
+			wfx_suspend_hot_dev(wdev, STA_NOTIFY_AWAKE);
+		else
+			wfx_suspend_hot_dev(wdev, STA_NOTIFY_SLEEP);
 	}
+
 	return 0;
 }
 
-static int hif_generic_indication(struct wfx_dev *wdev, struct hif_msg *hif,
-				  void *buf)
+static int hif_generic_indication(struct wfx_dev *wdev,
+				  const struct hif_msg *hif, const void *buf)
 {
-	struct hif_ind_generic *body = buf;
+	const struct hif_ind_generic *body = buf;
+	int type = le32_to_cpu(body->indication_type);
 
-	switch (body->indication_type) {
+	switch (type) {
 	case HIF_GENERIC_INDICATION_TYPE_RAW:
 		return 0;
 	case HIF_GENERIC_INDICATION_TYPE_STRING:
 		dev_info(wdev->dev, "firmware says: %s\n",
-			 (char *) body->indication_data.raw_data);
+			 (char *)body->indication_data.raw_data);
 		return 0;
 	case HIF_GENERIC_INDICATION_TYPE_RX_STATS:
 		mutex_lock(&wdev->rx_stats_lock);
@@ -290,28 +278,111 @@ static int hif_generic_indication(struct wfx_dev *wdev, struct hif_msg *hif,
 		       sizeof(wdev->rx_stats));
 		mutex_unlock(&wdev->rx_stats_lock);
 		return 0;
+	case HIF_GENERIC_INDICATION_TYPE_TX_POWER_LOOP_INFO:
+		mutex_lock(&wdev->tx_power_loop_info_lock);
+		memcpy(&wdev->tx_power_loop_info,
+		       &body->indication_data.tx_power_loop_info,
+		       sizeof(wdev->tx_power_loop_info));
+		mutex_unlock(&wdev->tx_power_loop_info_lock);
+		return 0;
 	default:
-		dev_err(wdev->dev,
-			"generic_indication: unknown indication type: %#.8x\n",
-			body->indication_type);
+		dev_err(wdev->dev, "generic_indication: unknown indication type: %#.8x\n",
+			type);
 		return -EIO;
 	}
 }
 
-static int hif_exception_indication(struct wfx_dev *wdev,
-				    struct hif_msg *hif, void *buf)
+static const struct {
+	int val;
+	const char *str;
+	bool has_param;
+} hif_errors[] = {
+	{ HIF_ERROR_FIRMWARE_ROLLBACK,
+		"rollback status" },
+	{ HIF_ERROR_FIRMWARE_DEBUG_ENABLED,
+		"debug feature enabled" },
+	{ HIF_ERROR_PDS_PAYLOAD,
+		"PDS version is not supported" },
+	{ HIF_ERROR_PDS_TESTFEATURE,
+		"PDS ask for an unknown test mode" },
+	{ HIF_ERROR_OOR_VOLTAGE,
+		"out-of-range power supply voltage", true },
+	{ HIF_ERROR_OOR_TEMPERATURE,
+		"out-of-range temperature", true },
+	{ HIF_ERROR_SLK_REQ_DURING_KEY_EXCHANGE,
+		"secure link does not expect request during key exchange" },
+	{ HIF_ERROR_SLK_SESSION_KEY,
+		"secure link session key is invalid" },
+	{ HIF_ERROR_SLK_OVERFLOW,
+		"secure link overflow" },
+	{ HIF_ERROR_SLK_WRONG_ENCRYPTION_STATE,
+		"secure link messages list does not match message encryption" },
+	{ HIF_ERROR_HIF_BUS_FREQUENCY_TOO_LOW,
+		"bus clock is too slow (<1kHz)" },
+	{ HIF_ERROR_HIF_RX_DATA_TOO_LARGE,
+		"HIF message too large" },
+	// Following errors only exists in old firmware versions:
+	{ HIF_ERROR_HIF_TX_QUEUE_FULL,
+		"HIF messages queue is full" },
+	{ HIF_ERROR_HIF_BUS,
+		"HIF bus" },
+	{ HIF_ERROR_SLK_MULTI_TX_UNSUPPORTED,
+		"secure link does not support multi-tx confirmations" },
+	{ HIF_ERROR_SLK_OUTDATED_SESSION_KEY,
+		"secure link session key is outdated" },
+	{ HIF_ERROR_SLK_DECRYPTION,
+		"secure link params (nonce or tag) mismatch" },
+};
+
+static int hif_error_indication(struct wfx_dev *wdev,
+				const struct hif_msg *hif, const void *buf)
 {
-	size_t len = hif->len - 4; // drop header
-	dev_err(wdev->dev, "firmware exception\n");
-	print_hex_dump_bytes("Dump: ", DUMP_PREFIX_NONE, buf, len);
-	wdev->chip_frozen = 1;
+	const struct hif_ind_error *body = buf;
+	int type = le32_to_cpu(body->type);
+	int param = (s8)body->data[0];
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(hif_errors); i++)
+		if (type == hif_errors[i].val)
+			break;
+	if (i < ARRAY_SIZE(hif_errors))
+		if (hif_errors[i].has_param)
+			dev_err(wdev->dev, "asynchronous error: %s: %d\n",
+				hif_errors[i].str, param);
+		else
+			dev_err(wdev->dev, "asynchronous error: %s\n",
+				hif_errors[i].str);
+	else
+		dev_err(wdev->dev, "asynchronous error: unknown: %08x\n", type);
+	print_hex_dump(KERN_INFO, "hif: ", DUMP_PREFIX_OFFSET,
+		       16, 1, hif, le16_to_cpu(hif->len), false);
+	wdev->chip_frozen = true;
+
+	return 0;
+};
+
+static int hif_exception_indication(struct wfx_dev *wdev,
+				    const struct hif_msg *hif, const void *buf)
+{
+	const struct hif_ind_exception *body = buf;
+	int type = le32_to_cpu(body->type);
+
+	if (type == 4)
+		dev_err(wdev->dev, "firmware assert %d\n",
+			le32_to_cpup((__le32 *)body->data));
+	else
+		dev_err(wdev->dev, "firmware exception\n");
+	print_hex_dump(KERN_INFO, "hif: ", DUMP_PREFIX_OFFSET,
+		       16, 1, hif, le16_to_cpu(hif->len), false);
+	wdev->chip_frozen = true;
 
 	return -1;
 }
 
 static const struct {
 	int msg_id;
-	int (*handler)(struct wfx_dev *wdev, struct hif_msg *hif, void *buf);
+	int (*handler)(struct wfx_dev *wdev,
+		       const struct hif_msg *hif, const void *buf);
 } hif_handlers[] = {
 	/* Confirmations */
 	{ HIF_CNF_ID_TX,                   hif_tx_confirm },
@@ -335,7 +406,7 @@ static const struct {
 void wfx_handle_rx(struct wfx_dev *wdev, struct sk_buff *skb)
 {
 	int i;
-	struct hif_msg *hif = (struct hif_msg *) skb->data;
+	const struct hif_msg *hif = (const struct hif_msg *)skb->data;
 	int hif_id = hif->id;
 
 	if (hif_id == HIF_IND_ID_RX) {
@@ -358,7 +429,12 @@ void wfx_handle_rx(struct wfx_dev *wdev, struct sk_buff *skb)
 			goto free;
 		}
 	}
-	dev_err(wdev->dev, "unsupported HIF ID %02x\n", hif_id);
+	if (hif_id & 0x80)
+		dev_err(wdev->dev, "unsupported HIF indication: ID %02x\n",
+			hif_id);
+	else
+		dev_err(wdev->dev, "unexpected HIF confirmation: ID %02x\n",
+			hif_id);
 free:
 	dev_kfree_skb(skb);
 }

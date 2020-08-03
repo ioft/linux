@@ -824,7 +824,7 @@ static int atmel_lcdfb_blank(int blank_mode, struct fb_info *info)
 	return ((blank_mode == FB_BLANK_NORMAL) ? 1 : 0);
 }
 
-static struct fb_ops atmel_lcdfb_ops = {
+static const struct fb_ops atmel_lcdfb_ops = {
 	.owner		= THIS_MODULE,
 	.fb_check_var	= atmel_lcdfb_check_var,
 	.fb_set_par	= atmel_lcdfb_set_par,
@@ -1114,7 +1114,6 @@ static int __init atmel_lcdfb_probe(struct platform_device *pdev)
 
 	sinfo->irq_base = platform_get_irq(pdev, 0);
 	if (sinfo->irq_base < 0) {
-		dev_err(dev, "unable to get irq\n");
 		ret = sinfo->irq_base;
 		goto stop_clk;
 	}

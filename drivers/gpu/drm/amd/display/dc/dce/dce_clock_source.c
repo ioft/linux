@@ -905,7 +905,7 @@ static bool dce112_program_pix_clk(
 	struct dce110_clk_src *clk_src = TO_DCE110_CLK_SRC(clock_source);
 	struct bp_pixel_clock_parameters bp_pc_params = {0};
 
-#if defined(CONFIG_DRM_AMD_DC_DCN1_0)
+#if defined(CONFIG_DRM_AMD_DC_DCN)
 	if (IS_FPGA_MAXIMUS_DC(clock_source->ctx->dce_environment)) {
 		unsigned int inst = pix_clk_params->controller_id - CONTROLLER_ID_D0;
 		unsigned dp_dto_ref_100hz = 7000000;
@@ -1004,7 +1004,6 @@ static bool get_pixel_clk_frequency_100hz(
 	return false;
 }
 
-#if defined(CONFIG_DRM_AMD_DC_DCN2_0)
 
 /* this table is use to find *1.001 and /1.001 pixel rates from non-precise pixel rate */
 struct pixel_rate_range_table_entry {
@@ -1013,39 +1012,6 @@ struct pixel_rate_range_table_entry {
 	unsigned int target_pixel_rate_khz;
 	unsigned short mult_factor;
 	unsigned short div_factor;
-};
-
-static const struct pixel_rate_range_table_entry video_optimized_pixel_rates[] = {
-	// /1.001 rates
-	{25170, 25180, 25200, 1000, 1001},	//25.2MHz   ->   25.17
-	{59340, 59350, 59400, 1000, 1001},	//59.4Mhz   ->   59.340
-	{74170, 74180, 74250, 1000, 1001},	//74.25Mhz  ->   74.1758
-	{125870, 125880, 126000, 1000, 1001},	//126Mhz    ->  125.87
-	{148350, 148360, 148500, 1000, 1001},	//148.5Mhz  ->  148.3516
-	{167830, 167840, 168000, 1000, 1001},	//168Mhz    ->  167.83
-	{222520, 222530, 222750, 1000, 1001},	//222.75Mhz ->  222.527
-	{257140, 257150, 257400, 1000, 1001},	//257.4Mhz  ->  257.1429
-	{296700, 296710, 297000, 1000, 1001},	//297Mhz    ->  296.7033
-	{342850, 342860, 343200, 1000, 1001},	//343.2Mhz  ->  342.857
-	{395600, 395610, 396000, 1000, 1001},	//396Mhz    ->  395.6
-	{409090, 409100, 409500, 1000, 1001},	//409.5Mhz  ->  409.091
-	{445050, 445060, 445500, 1000, 1001},	//445.5Mhz  ->  445.055
-	{467530, 467540, 468000, 1000, 1001},	//468Mhz    ->  467.5325
-	{519230, 519240, 519750, 1000, 1001},	//519.75Mhz ->  519.231
-	{525970, 525980, 526500, 1000, 1001},	//526.5Mhz  ->  525.974
-	{545450, 545460, 546000, 1000, 1001},	//546Mhz    ->  545.455
-	{593400, 593410, 594000, 1000, 1001},	//594Mhz    ->  593.4066
-	{623370, 623380, 624000, 1000, 1001},	//624Mhz    ->  623.377
-	{692300, 692310, 693000, 1000, 1001},	//693Mhz    ->  692.308
-	{701290, 701300, 702000, 1000, 1001},	//702Mhz    ->  701.2987
-	{791200, 791210, 792000, 1000, 1001},	//792Mhz    ->  791.209
-	{890100, 890110, 891000, 1000, 1001},	//891Mhz    ->  890.1099
-	{1186810, 1186820, 1188000, 1000, 1001},//1188Mhz   -> 1186.8131
-
-	// *1.001 rates
-	{27020, 27030, 27000, 1001, 1000}, //27Mhz
-	{54050, 54060, 54000, 1001, 1000}, //54Mhz
-	{108100, 108110, 108000, 1001, 1000},//108Mhz
 };
 
 static bool dcn20_program_pix_clk(
@@ -1064,7 +1030,6 @@ static const struct clock_source_funcs dcn20_clk_src_funcs = {
 	.get_pix_clk_dividers = dce112_get_pix_clk_dividers,
 	.get_pixel_clk_frequency_100hz = get_pixel_clk_frequency_100hz
 };
-#endif
 
 /*****************************************/
 /* Constructor                           */
@@ -1435,7 +1400,6 @@ bool dce112_clk_src_construct(
 	return true;
 }
 
-#if defined(CONFIG_DRM_AMD_DC_DCN2_0)
 bool dcn20_clk_src_construct(
 	struct dce110_clk_src *clk_src,
 	struct dc_context *ctx,
@@ -1451,4 +1415,3 @@ bool dcn20_clk_src_construct(
 
 	return ret;
 }
-#endif

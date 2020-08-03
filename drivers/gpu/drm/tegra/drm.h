@@ -9,7 +9,7 @@
 
 #include <linux/host1x.h>
 #include <linux/iova.h>
-#include <linux/of_gpio.h>
+#include <linux/gpio/consumer.h>
 
 #include <drm/drm_atomic.h>
 #include <drm/drm_edid.h>
@@ -144,13 +144,13 @@ int tegra_output_init(struct drm_device *drm, struct tegra_output *output);
 void tegra_output_exit(struct tegra_output *output);
 void tegra_output_find_possible_crtcs(struct tegra_output *output,
 				      struct drm_device *drm);
+int tegra_output_suspend(struct tegra_output *output);
+int tegra_output_resume(struct tegra_output *output);
 
 int tegra_output_connector_get_modes(struct drm_connector *connector);
 enum drm_connector_status
 tegra_output_connector_detect(struct drm_connector *connector, bool force);
 void tegra_output_connector_destroy(struct drm_connector *connector);
-
-void tegra_output_encoder_destroy(struct drm_encoder *encoder);
 
 /* from dpaux.c */
 struct drm_dp_aux *drm_dp_aux_find_by_of_node(struct device_node *np);

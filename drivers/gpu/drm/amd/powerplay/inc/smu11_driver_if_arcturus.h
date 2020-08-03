@@ -82,8 +82,8 @@
 // Other
 #define FEATURE_OUT_OF_BAND_MONITOR_BIT 24
 #define FEATURE_TEMP_DEPENDENT_VMIN_BIT 25
+#define FEATURE_PER_PART_VMIN_BIT       26
 
-#define FEATURE_SPARE_26_BIT            26
 #define FEATURE_SPARE_27_BIT            27
 #define FEATURE_SPARE_28_BIT            28
 #define FEATURE_SPARE_29_BIT            29
@@ -154,6 +154,7 @@
 
 #define FEATURE_OUT_OF_BAND_MONITOR_MASK  (1 << FEATURE_OUT_OF_BAND_MONITOR_BIT   )
 #define FEATURE_TEMP_DEPENDENT_VMIN_MASK  (1 << FEATURE_TEMP_DEPENDENT_VMIN_BIT )
+#define FEATURE_PER_PART_VMIN_MASK        (1 << FEATURE_PER_PART_VMIN_BIT        )
 
 
 //FIXME need updating
@@ -622,8 +623,20 @@ typedef struct {
   uint16_t     PccThresholdHigh;
   uint32_t     PaddingAPCC[6];  //FIXME pending SPEC
 
+  // OOB Settings
+  uint16_t BasePerformanceCardPower;
+  uint16_t MaxPerformanceCardPower;
+  uint16_t BasePerformanceFrequencyCap;   //In Mhz
+  uint16_t MaxPerformanceFrequencyCap;    //In Mhz
+
+  // Per-Part Vmin
+  uint16_t VDDGFX_VminLow;        // mv Q2
+  uint16_t VDDGFX_TVminLow;       //Celcius
+  uint16_t VDDGFX_VminLow_HiTemp; // mv Q2
+  uint16_t VDDGFX_VminLow_LoTemp; // mv Q2
+
   // SECTION: Reserved
-  uint32_t     Reserved[11];
+  uint32_t     Reserved[7];
 
   // SECTION: BOARD PARAMETERS
 
@@ -823,7 +836,6 @@ typedef struct {
   uint32_t MmHubPadding[8]; // SMU internal use
 } AvfsFuseOverride_t;
 
-/* NOT CURRENTLY USED
 typedef struct {
   uint8_t   Gfx_ActiveHystLimit;
   uint8_t   Gfx_IdleHystLimit;
@@ -864,9 +876,12 @@ typedef struct {
   uint8_t   Mem_DownHystLimit;
   uint16_t  Mem_Fps;
 
+  uint32_t  BusyThreshold;                  // Q16
+  uint32_t  BusyHyst;
+  uint32_t  IdleHyst;
+
   uint32_t  MmHubPadding[8]; // SMU internal use
 } DpmActivityMonitorCoeffInt_t;
-*/
 
 // These defines are used with the following messages:
 // SMC_MSG_TransferTableDram2Smu
@@ -878,11 +893,11 @@ typedef struct {
 #define TABLE_PMSTATUSLOG             4
 #define TABLE_SMU_METRICS             5
 #define TABLE_DRIVER_SMU_CONFIG       6
-//#define TABLE_ACTIVITY_MONITOR_COEFF  7
 #define TABLE_OVERDRIVE               7
 #define TABLE_WAFL_XGMI_TOPOLOGY      8
 #define TABLE_I2C_COMMANDS            9
-#define TABLE_COUNT                   10
+#define TABLE_ACTIVITY_MONITOR_COEFF  10
+#define TABLE_COUNT                   11
 
 // These defines are used with the SMC_MSG_SetUclkFastSwitch message.
 typedef enum {

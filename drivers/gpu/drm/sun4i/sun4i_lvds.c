@@ -12,6 +12,7 @@
 #include <drm/drm_panel.h>
 #include <drm/drm_print.h>
 #include <drm/drm_probe_helper.h>
+#include <drm/drm_simple_kms_helper.h>
 
 #include "sun4i_crtc.h"
 #include "sun4i_tcon.h"
@@ -43,7 +44,7 @@ static int sun4i_lvds_get_modes(struct drm_connector *connector)
 	struct sun4i_lvds *lvds =
 		drm_connector_to_sun4i_lvds(connector);
 
-	return drm_panel_get_modes(lvds->panel);
+	return drm_panel_get_modes(lvds->panel, connector);
 }
 
 static struct drm_connector_helper_funcs sun4i_lvds_con_helper_funcs = {
@@ -96,10 +97,6 @@ static const struct drm_encoder_helper_funcs sun4i_lvds_enc_helper_funcs = {
 	.enable		= sun4i_lvds_encoder_enable,
 };
 
-static const struct drm_encoder_funcs sun4i_lvds_enc_funcs = {
-	.destroy	= drm_encoder_cleanup,
-};
-
 int sun4i_lvds_init(struct drm_device *drm, struct sun4i_tcon *tcon)
 {
 	struct drm_encoder *encoder;
@@ -121,11 +118,8 @@ int sun4i_lvds_init(struct drm_device *drm, struct sun4i_tcon *tcon)
 
 	drm_encoder_helper_add(&lvds->encoder,
 			       &sun4i_lvds_enc_helper_funcs);
-	ret = drm_encoder_init(drm,
-			       &lvds->encoder,
-			       &sun4i_lvds_enc_funcs,
-			       DRM_MODE_ENCODER_LVDS,
-			       NULL);
+	ret = drm_simple_encoder_init(drm, &lvds->encoder,
+				      DRM_MODE_ENCODER_LVDS);
 	if (ret) {
 		dev_err(drm->dev, "Couldn't initialise the lvds encoder\n");
 		goto err_out;
@@ -156,7 +150,7 @@ int sun4i_lvds_init(struct drm_device *drm, struct sun4i_tcon *tcon)
 	}
 
 	if (bridge) {
-		ret = drm_bridge_attach(encoder, bridge, NULL);
+		ret = drm_bridge_attach(encoder, bridge, NULL, 0);
 		if (ret) {
 			dev_err(drm->dev, "Couldn't attach our bridge\n");
 			goto err_cleanup_connector;

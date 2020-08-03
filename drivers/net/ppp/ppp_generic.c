@@ -296,8 +296,6 @@ static struct class *ppp_class;
 /* per net-namespace data */
 static inline struct ppp_net *ppp_pernet(struct net *net)
 {
-	BUG_ON(!net);
-
 	return net_generic(net, ppp_net_id);
 }
 
@@ -1411,6 +1409,8 @@ ppp_get_stats64(struct net_device *dev, struct rtnl_link_stats64 *stats64)
 static int ppp_dev_init(struct net_device *dev)
 {
 	struct ppp *ppp;
+
+	netdev_lockdep_set_classes(dev);
 
 	ppp = netdev_priv(dev);
 	/* Let the netdevice take a reference on the ppp file. This ensures
